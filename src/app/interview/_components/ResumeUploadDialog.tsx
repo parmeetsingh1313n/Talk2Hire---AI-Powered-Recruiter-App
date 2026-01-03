@@ -3,8 +3,8 @@ import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Briefcase, Award, 
 
 interface Project {
     name: string;
-    main_points: string[];
-    technologies: string[];
+    main_points?: string[];
+    technologies?: string[];
 }
 
 interface Education {
@@ -124,20 +124,27 @@ const ResumeUploadDialog = ({
             if (userName) formData.append('userName', userName);
             if (userEmail) formData.append('userEmail', userEmail);
 
-            setProcessingStatus('Extracting text from document...');
+            setProcessingStatus('Validating document...');
 
             const response = await fetch('/api/resume-analysis', {
                 method: 'POST',
                 body: formData,
             });
 
-            const result: ResumeAnalysisResult = await response.json();
+            const result = await response.json();
 
             if (!response.ok) {
+                // Special handling for non-resume documents
+                if (result.is_resume === false) {
+                    throw new Error(result.error || 'This document does not appear to be a resume. Please upload a valid resume (CV).');
+                }
                 throw new Error(result.error || `Upload failed with status ${response.status}`);
             }
 
             if (!result.success) {
+                if (result.is_resume === false) {
+                    throw new Error(result.error || 'This document does not appear to be a resume. Please upload a valid resume (CV).');
+                }
                 throw new Error(result.error || 'Analysis failed');
             }
 
@@ -151,9 +158,21 @@ const ResumeUploadDialog = ({
 
         } catch (error) {
             console.error('Upload error:', error);
+
+            let errorMessage = 'Failed to process resume. Please try again.';
+
+            if (error instanceof Error) {
+                errorMessage = error.message;
+
+                // Make error messages more user-friendly
+                if (errorMessage.includes('resume') || errorMessage.includes('CV')) {
+                    errorMessage = `❌ ${errorMessage}`;
+                }
+            }
+
             setAnalysisResult({
                 success: false,
-                error: error instanceof Error ? error.message : 'Failed to process resume. Please try again.',
+                error: errorMessage,
                 data: {} as ResumeAnalysisData,
                 timestamp: new Date().toISOString()
             });
@@ -322,8 +341,8 @@ const ResumeUploadDialog = ({
                                 </div>
                             </div>
                         </div>
-                    ) : !analysisResult?.success ? (
-                        /* Upload Area */
+                    ) : analysisResult === null ? (
+                        /* Upload Area (no result yet) */
                         <div
                             className={`border-2 border-dashed rounded-xl p-12 text-center transition-all ${dragActive ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400'
                                 }`}
@@ -338,7 +357,7 @@ const ResumeUploadDialog = ({
                                 <p className="text-gray-500">PDF, DOC, DOCX, or TXT • Max 10MB</p>
                                 <button
                                     onClick={() => document.getElementById('resume-upload')?.click()}
-                                            className="px-6 py-3 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors"
+                                    className="px-6 py-3 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors"
                                 >
                                     Choose File
                                 </button>
@@ -351,7 +370,7 @@ const ResumeUploadDialog = ({
                                 />
                             </div>
                         </div>
-                    ) : (
+                    ) : analysisResult.success ? (
                         /* Results Display */
                         <div className="space-y-6">
                             {/* File Info */}
@@ -366,14 +385,6 @@ const ResumeUploadDialog = ({
                                     </div>
                                     {processing && <Loader2 className="w-5 h-5 animate-spin text-blue-600" />}
                                     {!processing && <CheckCircle className="w-5 h-5 text-green-600" />}
-                                </div>
-                            )}
-
-                            {/* Processing Status */}
-                            {processing && (
-                                <div className="text-center py-8 bg-blue-50 rounded-lg">
-                                    <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
-                                    <p className="text-lg font-medium">{processingStatus}</p>
                                 </div>
                             )}
 
@@ -476,7 +487,7 @@ const ResumeUploadDialog = ({
                                                             <h4 className="font-semibold text-gray-900 flex-1">{project.name}</h4>
                                                         </div>
 
-                                                        {project.main_points.length > 0 && (
+                                                        {project.main_points && project.main_points.length > 0 && (
                                                             <div className="mb-3 ml-11">
                                                                 <p className="text-xs font-medium text-gray-600 mb-2">Key Features:</p>
                                                                 <ul className="space-y-1">
@@ -490,7 +501,7 @@ const ResumeUploadDialog = ({
                                                             </div>
                                                         )}
 
-                                                        {project.technologies.length > 0 && (
+                                                        {project.technologies && project.technologies.length > 0 && (
                                                             <div className="ml-11">
                                                                 <p className="text-xs font-medium text-gray-600 mb-2">Technologies:</p>
                                                                 <div className="flex flex-wrap gap-2">
@@ -584,21 +595,35 @@ const ResumeUploadDialog = ({
                                     )}
                                 </>
                             )}
+                        </div>
+                    ) : (
+                        /* Error State */
+                        <div className="text-center py-8 bg-red-50 rounded-lg border border-red-200">
+                            <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
+                            <p className="text-lg font-medium text-red-900">Upload Failed</p>
+                            <p className="text-sm text-red-700 mt-2">{analysisResult.error}</p>
 
-                            {/* Error State */}
-                            {analysisResult && !analysisResult.success && (
-                                <div className="text-center py-8 bg-red-50 rounded-lg border border-red-200">
-                                    <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
-                                    <p className="text-lg font-medium text-red-900">Analysis Failed</p>
-                                    <p className="text-sm text-red-700 mt-2">{analysisResult.error}</p>
-                                    <button
-                                        onClick={resetDialog}
-                                                    className="mt-4 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer"
-                                    >
-                                        Try Again
-                                    </button>
+                            {/* Special message for resume validation errors */}
+                            {analysisResult.error?.includes("doesn't appear to be a resume") && (
+                                <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                    <p className="text-sm text-yellow-800">
+                                        <strong>Tip:</strong> Make sure your document contains:
+                                    </p>
+                                    <ul className="text-xs text-yellow-700 mt-2 text-left">
+                                        <li>• Work Experience section</li>
+                                        <li>• Education section</li>
+                                        <li>• Skills section</li>
+                                        <li>• Contact information (email/phone)</li>
+                                    </ul>
                                 </div>
                             )}
+
+                            <button
+                                onClick={resetDialog}
+                                className="mt-4 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer"
+                            >
+                                Try Again
+                            </button>
                         </div>
                     )}
                 </div>
