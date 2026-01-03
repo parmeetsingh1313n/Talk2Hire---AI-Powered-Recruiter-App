@@ -4,46 +4,35 @@ import os
 import re
 import json
 import io
+import traceback
 from datetime import datetime
-from typing import Dict, List, Any, Optional
-import PyPDF2
+import pdfplumber
 from docx import Document
 import requests
-from werkzeug.utils import secure_filename
-import openai
 
 app = Flask(__name__)
 
 # CORS configuration
-CORS(
-    app,
-    origins=["http://localhost:3000"],
-    methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Accept", "Authorization"],
-    supports_credentials=True,
-)
+CORS(app)
 
 # Configuration
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_MIME_TYPES = [
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "text/plain",
-]
 
-# Initialize OpenAI client for Groq
-try:
-    groq_client = openai.OpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"), base_url="https://api.groq.com/openai/v1"
-    )
-    print("✅ Groq client initialized successfully")
-except Exception as e:
-    groq_client = None
-    print(f"⚠️  Groq client initialization failed: {str(e)}")
-    print(
-        "⚠️  AI analysis will be disabled. Please set GROQ_API_KEY environment variable."
-    )
+# Groq API Configuration
+GROQ_API_KEY = os.getenv(
+    "GROQ_API_KEY", "REDACTED_ROTATED_KEY"
+)
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+print(f"🔑 Groq API Key: {GROQ_API_KEY[:15]}...")
+
+
+def allowed_file(filename):
+    """Check if file extension is allowed"""
+    allowed_extensions = {".pdf", ".doc", ".docx", ".txt"}
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in [
+        ext[1:] for ext in allowed_extensions
+    ]
 
 
 class ResumeAnalyzer:
@@ -123,168 +112,157 @@ class ResumeAnalyzer:
         }
 
     def extract_text_from_pdf(self, file_content: bytes) -> str:
-        """Extract text from PDF using PyPDF2"""
+        """Extract text from PDF using pdfplumber"""
         try:
-            pdf_file = io.BytesIO(file_content)
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
             text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
+            with pdfplumber.open(io.BytesIO(file_content)) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
             return text.strip()
         except Exception as e:
+            print(f"PDF extraction error: {str(e)}")
             raise Exception(f"Failed to extract text from PDF: {str(e)}")
 
     def extract_text_from_docx(self, file_content: bytes) -> str:
         """Extract text from DOCX using python-docx"""
         try:
-            doc_file = io.BytesIO(file_content)
-            doc = Document(doc_file)
+            doc = Document(io.BytesIO(file_content))
             text = ""
             for paragraph in doc.paragraphs:
                 text += paragraph.text + "\n"
             return text.strip()
         except Exception as e:
+            print(f"DOCX extraction error: {str(e)}")
             raise Exception(f"Failed to extract text from DOCX: {str(e)}")
 
     def extract_text_from_txt(self, file_content: bytes) -> str:
         """Extract text from TXT file"""
         try:
-            return file_content.decode("utf-8").strip()
+            encodings = ["utf-8", "latin-1", "iso-8859-1", "windows-1252"]
+            for encoding in encodings:
+                try:
+                    return file_content.decode(encoding).strip()
+                except UnicodeDecodeError:
+                    continue
+            return file_content.decode("utf-8", errors="ignore").strip()
         except Exception as e:
+            print(f"TXT extraction error: {str(e)}")
             raise Exception(f"Failed to extract text from TXT: {str(e)}")
 
-    def analyze_resume_with_groq(self, text: str) -> Dict[str, Any]:
-        """Analyze resume text using Groq AI via OpenAI client"""
-        if not groq_client:
-            raise Exception("Groq client not configured")
+    def extract_personal_info(self, text: str):
+        """Extract personal information from text"""
+        info = {"name": "", "email": "", "phone": ""}
 
-        system_prompt = """You are an expert resume analyzer. Extract and structure information from the resume text into the following JSON format:
+        # Extract email
+        email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+        email_match = re.search(email_pattern, text)
+        if email_match:
+            info["email"] = email_match.group(0)
 
+        # Extract phone
+        phone_patterns = [
+            r"\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}",
+            r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}",
+            r"\d{3}[-.\s]?\d{3}[-.\s]?\d{4}",
+        ]
+
+        for pattern in phone_patterns:
+            phone_match = re.search(pattern, text)
+            if phone_match:
+                info["phone"] = phone_match.group(0)
+                break
+
+        # Try to extract name (simple heuristic)
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+        for line in lines[:3]:
+            if (
+                len(line) < 50
+                and len(line.split()) <= 4
+                and "@" not in line
+                and not re.search(r"\d{10}", line)
+            ):
+                info["name"] = line
+                break
+
+        return info
+
+    def analyze_resume_with_groq(self, text: str):
+        """Analyze resume text using Groq API directly"""
+        if not GROQ_API_KEY:
+            raise Exception("Groq API key not configured")
+
+        system_prompt = """You are an expert resume analyzer. Extract and structure information from the resume text into JSON format.
+
+Extract the following information in JSON format:
 {
-    "education": [
-        {
-            "degree": "string",
-            "institution": "string", 
-            "year": "string",
-            "gpa": "string (optional)"
-        }
-    ],
-    "projects": [
-        {
-            "name": "string",
-            "main_points": ["string array of key features"],
-            "technologies": ["string array of technologies used"]
-        }
-    ],
-    "experience": {
-        "years": "number (calculate total years)",
-        "level": "string (Fresher, Junior, Mid-Level, Senior)"
-    },
-    "skills": {
-        "Programming Languages": ["string array"],
-        "Web Technologies": ["string array"],
-        "Databases": ["string array"],
-        "Frameworks & Libraries": ["string array"],
-        "Tools & Platforms": ["string array"],
-        "Soft Skills": ["string array"]
-    },
-    "certifications": [
-        {
-            "name": "string",
-            "year": "string"
-        }
-    ],
-    "achievements": ["string array"],
-    "personal_info": {
-        "name": "string",
-        "email": "string",
-        "phone": "string"
-    },
-    "analysis_summary": {
-        "total_projects": "number",
-        "education_entries": "number", 
-        "skill_categories": "number",
-        "certifications_count": "number",
-        "achievements_count": "number",
-        "candidate_type": "string",
-        "overall_strengths": ["string array of key strengths"]
-    }
+    "education": [{"degree": "...", "institution": "...", "year": "..."}],
+    "projects": [{"name": "...", "description": "...", "technologies": ["..."], "main_points": ["..."]}],
+    "experience": {"years": 0, "level": "Fresher/Junior/Mid-Level/Senior"},
+    "skills": {"Programming Languages": [], "Web Technologies": [], "Databases": [], "Frameworks & Libraries": [], "Tools & Platforms": []},
+    "certifications": [{"name": "...", "year": "..."}],
+    "achievements": ["..."],
+    "personal_info": {"name": "...", "email": "...", "phone": "..."},
+    "analysis_summary": {"total_projects": 0, "education_entries": 0, "skill_categories": 0, "certifications_count": 0, "achievements_count": 0, "candidate_type": "...", "overall_strengths": []}
 }
 
-Instructions:
-1. Extract all education details including degree, institution, year, and GPA if available
-2. Extract projects with their main features/points and technologies used
-3. Calculate total years of experience from work history and assign appropriate level
-4. Categorize skills into appropriate groups
-5. Extract certifications with names and years
-6. Extract achievements and awards
-7. Extract personal information (name, email, phone)
-8. Provide analysis summary with counts and candidate type
-9. Be accurate and thorough in extraction
+IMPORTANT: For projects, include BOTH "description" (string) AND "main_points" (array of strings).
+"main_points" should be key features/bullet points extracted from the project description.
 
-Return ONLY valid JSON, no other text."""
+Return ONLY the JSON, no other text."""
 
         try:
-            # Available Groq models
-            models = [
-                "openai/gpt-oss-120b",
-                "llama-3.3-70b-versatile",
-                "llama-3.1-8b-instant",
-                "mixtral-8x7b-32768",
-                "llama-3.2-1b-preview",
-                "llama-3.2-3b-preview",
-            ]
+            # Truncate if too long
+            truncated_text = text[:5000] if len(text) > 5000 else text
 
-            completion = None
-            last_error = None
+            print(f"🤖 Sending {len(truncated_text)} chars to Groq API...")
 
-            for model in models:
-                try:
-                    print(f"🔄 Trying Groq model: {model}")
-                    completion = groq_client.chat.completions.create(
-                        model=model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {
-                                "role": "user",
-                                "content": f"Resume Text:\n{text[:15000]}",
-                            },
-                        ],
-                        temperature=0.1,
-                        max_tokens=4000,
-                        response_format={"type": "json_object"},
-                    )
-                    print(f"✅ Success with model: {model}")
-                    break
-                except Exception as model_error:
-                    print(f"❌ Model {model} failed: {str(model_error)}")
-                    last_error = model_error
-                    continue
+            headers = {
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            }
 
-            if not completion:
-                raise Exception(
-                    f"All Groq models failed. Last error: {str(last_error)}"
-                )
+            data = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": f"Analyze this resume:\n\n{truncated_text}",
+                    },
+                ],
+                "temperature": 0.1,
+                "max_tokens": 2000,
+            }
 
-            raw_content = completion.choices[0].message.content
-            if not raw_content:
-                raise Exception("No content received from Groq")
+            response = requests.post(
+                GROQ_API_URL, headers=headers, json=data, timeout=30
+            )
 
-            print("✅ Raw Groq response received")
+            if response.status_code != 200:
+                print(f"❌ Groq API error: {response.status_code} - {response.text}")
+                raise Exception(f"API error: {response.status_code}")
 
-            # Parse JSON response
-            analysis_result = json.loads(raw_content)
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
 
-            # Validate and clean the analysis
-            return self.validate_and_clean_analysis(analysis_result)
+            # Extract JSON from response
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                analysis_result = json.loads(json_str)
+                return self.validate_and_clean_analysis(analysis_result)
+            else:
+                print(f"⚠️ No JSON found in response: {content[:200]}")
+                raise Exception("Invalid response format from AI")
 
         except Exception as e:
             print(f"❌ Groq analysis error: {str(e)}")
             raise Exception(f"AI analysis failed: {str(e)}")
 
-    def validate_and_clean_analysis(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_and_clean_analysis(self, analysis):
         """Validate and clean the analysis result"""
-        # Ensure all required fields exist
         validated = {
             "education": analysis.get("education", []),
             "projects": analysis.get("projects", []),
@@ -295,33 +273,37 @@ Return ONLY valid JSON, no other text."""
             "personal_info": analysis.get(
                 "personal_info", {"name": "", "email": "", "phone": ""}
             ),
-            "analysis_summary": analysis.get(
-                "analysis_summary",
-                {
-                    "total_projects": 0,
-                    "education_entries": 0,
-                    "skill_categories": 0,
-                    "certifications_count": 0,
-                    "achievements_count": 0,
-                    "candidate_type": "Fresher",
-                    "overall_strengths": [],
-                },
-            ),
+            "analysis_summary": analysis.get("analysis_summary", {}),
         }
 
-        # Calculate experience level if not properly set
-        if not validated["experience"].get("level"):
-            years = validated["experience"].get("years", 0)
-            validated["experience"]["level"] = self.get_experience_level(years)
+        # Ensure projects have main_points array
+        for project in validated["projects"]:
+            if "main_points" not in project or not isinstance(
+                project["main_points"], list
+            ):
+                project["main_points"] = []
 
-        # Ensure analysis summary counts are accurate
+        # Calculate experience level
+        years = validated["experience"].get("years", 0)
+        if years == 0:
+            level = "Fresher"
+        elif years <= 2:
+            level = "Junior"
+        elif years <= 5:
+            level = "Mid-Level"
+        else:
+            level = "Senior"
+
+        validated["experience"]["level"] = level
+
+        # Update summary
         validated["analysis_summary"] = {
             "total_projects": len(validated["projects"]),
             "education_entries": len(validated["education"]),
             "skill_categories": len(validated["skills"]),
             "certifications_count": len(validated["certifications"]),
             "achievements_count": len(validated["achievements"]),
-            "candidate_type": validated["experience"]["level"],
+            "candidate_type": level,
             "overall_strengths": validated["analysis_summary"].get(
                 "overall_strengths", []
             ),
@@ -329,68 +311,55 @@ Return ONLY valid JSON, no other text."""
 
         return validated
 
-    def get_experience_level(self, years: int) -> str:
-        """Get experience level based on years"""
-        if years == 0:
-            return "Fresher"
-        elif years <= 2:
-            return "Junior Professional (0-2 years)"
-        elif years <= 5:
-            return "Mid-Level Professional (2-5 years)"
-        else:
-            return "Senior Professional (5+ years)"
-
-    def analyze_resume_text(self, text: str) -> Dict[str, Any]:
+    def analyze_resume_text(self, text: str):
         """Main function to analyze resume text"""
-        print("Starting resume analysis...")
+        print(f"📄 Analyzing resume text ({len(text)} characters)...")
 
         try:
-            # Use Groq AI for analysis
-            if groq_client:
-                print("Using Groq AI for resume analysis...")
-                return self.analyze_resume_with_groq(text)
-            else:
-                raise Exception(
-                    "Groq API not configured. Please set GROQ_API_KEY environment variable."
-                )
+            print("🤖 Using Groq API for analysis...")
+            result = self.analyze_resume_with_groq(text)
+
+            # Enhance with personal info from text
+            personal_info = self.extract_personal_info(text)
+            if not result["personal_info"]["name"] and personal_info["name"]:
+                result["personal_info"]["name"] = personal_info["name"]
+            if not result["personal_info"]["email"] and personal_info["email"]:
+                result["personal_info"]["email"] = personal_info["email"]
+            if not result["personal_info"]["phone"] and personal_info["phone"]:
+                result["personal_info"]["phone"] = personal_info["phone"]
+
+            return result
 
         except Exception as e:
-            print(f"AI analysis failed: {str(e)}")
-            # Fallback to basic extraction if AI fails
+            print(f"⚠️ AI analysis failed, using fallback: {str(e)}")
             return self.basic_resume_analysis(text)
 
-    def basic_resume_analysis(self, text: str) -> Dict[str, Any]:
+    def basic_resume_analysis(self, text: str):
         """Basic resume analysis as fallback"""
-        print("Using basic resume analysis as fallback...")
+        personal_info = self.extract_personal_info(text)
 
-        # Extract email
-        email_match = re.search(
-            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", text
-        )
-        email = email_match.group(0) if email_match else ""
-
-        # Extract phone
-        phone_match = re.search(
-            r"(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}", text
-        )
-        phone = phone_match.group(0) if phone_match else ""
-
-        # Extract name (first line usually)
-        lines = text.split("\n")
-        name = lines[0].strip() if lines else "Candidate"
+        # Simple skill extraction
+        skills_found = {}
+        for category, skill_list in self.skill_categories.items():
+            found = []
+            for skill in skill_list:
+                if re.search(r"\b" + re.escape(skill) + r"\b", text, re.IGNORECASE):
+                    found.append(skill.title())
+            if found:
+                skills_found[category] = found
 
         return {
             "education": [],
             "projects": [],
             "experience": {"years": 0, "level": "Fresher"},
-            "skills": {},
+            "skills": skills_found,
             "certifications": [],
             "achievements": [],
-            "personal_info": {"name": name, "email": email, "phone": phone},
+            "personal_info": personal_info,
             "analysis_summary": {
                 "total_projects": 0,
                 "education_entries": 0,
-                "skill_categories": 0,
+                "skill_categories": len(skills_found),
                 "certifications_count": 0,
                 "achievements_count": 0,
                 "candidate_type": "Fresher",
@@ -403,8 +372,24 @@ Return ONLY valid JSON, no other text."""
 analyzer = ResumeAnalyzer()
 
 
-@app.route("/backend/analyze_pdf", methods=["POST", "OPTIONS"])
-def analyze_pdf():
+@app.route("/")
+def index():
+    return jsonify(
+        {
+            "message": "Resume Analyzer API",
+            "status": "running",
+            "endpoints": {
+                "POST /upload": "Upload and analyze resume",
+                "POST /analyze": "Analyze resume text",
+                "GET /health": "Health check",
+                "POST /backend/analyze_resume_direct": "Legacy endpoint",
+            },
+        }
+    )
+
+
+@app.route("/upload", methods=["POST", "OPTIONS"])
+def upload_file():
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
 
@@ -416,98 +401,85 @@ def analyze_pdf():
         if file.filename == "":
             return jsonify({"error": "No file selected"}), 400
 
-        # Validate file type
-        if file.mimetype not in ALLOWED_MIME_TYPES:
-            return jsonify({"error": "Unsupported file type"}), 400
+        # Check file size
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
 
-        # Read file content
-        file_content = file.read()
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({"error": "File too large (max 10MB)"}), 413
 
-        # Validate file size
-        if len(file_content) > MAX_FILE_SIZE:
-            return jsonify({"error": "File size too large"}), 400
-
-        # Extract text based on file type
-        text = ""
-        if file.mimetype == "application/pdf":
-            text = analyzer.extract_text_from_pdf(file_content)
-        elif (
-            file.mimetype
-            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ):
-            text = analyzer.extract_text_from_docx(file_content)
-        elif file.mimetype == "text/plain":
-            text = analyzer.extract_text_from_txt(file_content)
-        else:
-            return jsonify({"error": "Unsupported file type"}), 400
-
-        if not text or len(text) < 50:
+        # Check file type
+        if not allowed_file(file.filename):
             return (
-                jsonify({"error": "Could not extract sufficient text from file"}),
+                jsonify({"error": "Invalid file type. Allowed: PDF, DOC, DOCX, TXT"}),
                 400,
             )
+
+        # Read and extract text
+        file_content = file.read()
+        filename = file.filename.lower()
+
+        text = ""
+        if filename.endswith(".pdf"):
+            text = analyzer.extract_text_from_pdf(file_content)
+        elif filename.endswith((".docx", ".doc")):
+            text = analyzer.extract_text_from_docx(file_content)
+        elif filename.endswith(".txt"):
+            text = analyzer.extract_text_from_txt(file_content)
+
+        if not text or len(text.strip()) < 50:
+            return jsonify({"error": "Could not extract sufficient text"}), 400
+
+        # Analyze
+        result = analyzer.analyze_resume_text(text)
 
         return jsonify(
             {
                 "success": True,
-                "text": text,
+                "data": result,
                 "filename": file.filename,
-                "text_length": len(text),
+                "fileSize": file_size,
+                "extractedTextLength": len(text),
+                "timestamp": datetime.now().isoformat(),
             }
         )
 
     except Exception as e:
-        print(f"Text extraction error: {str(e)}")
-        return jsonify({"error": f"Failed to extract text: {str(e)}"}), 500
+        print(f"Upload error: {str(e)}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
-@app.route("/backend/analyze_resume", methods=["POST", "OPTIONS"])
-def analyze_resume():
+@app.route("/analyze", methods=["POST", "OPTIONS"])
+def analyze():
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
 
     try:
         data = request.get_json()
         if not data or "text" not in data:
-            return jsonify({"error": "No text provided for analysis"}), 400
+            return jsonify({"error": "No text provided"}), 400
 
-        text = data["text"]
-        if not text or len(text.strip()) < 50:
-            return jsonify({"error": "Insufficient text for analysis"}), 400
+        text = data["text"].strip()
+        if len(text) < 50:
+            return jsonify({"error": "Text too short"}), 400
 
-        print(f"Analyzing resume text ({len(text)} characters)...")
-
-        # Analyze the resume
-        analysis_result = analyzer.analyze_resume_text(text)
-
-        # Validate the analysis result has all required fields
-        if not analysis_result:
-            return jsonify({"error": "Analysis returned no results"}), 500
-
-        print(
-            f"Analysis completed: {len(analysis_result.get('projects', []))} projects, "
-            f"{len(analysis_result.get('education', []))} education entries"
-        )
+        result = analyzer.analyze_resume_text(text)
 
         return jsonify(
-            {
-                "success": True,
-                "data": analysis_result,
-                "timestamp": datetime.now().isoformat(),
-            }
+            {"success": True, "data": result, "timestamp": datetime.now().isoformat()}
         )
 
     except Exception as e:
-        print(f"Resume analysis error: {str(e)}")
-        import traceback
-
+        print(f"Analysis error: {str(e)}")
         traceback.print_exc()
-        return jsonify({"error": f"Analysis failed: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/backend/analyze_resume_direct", methods=["POST", "OPTIONS"])
 def analyze_resume_direct():
-    """Direct endpoint that handles file upload and analysis in one call"""
+    """Legacy endpoint for frontend compatibility"""
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
 
@@ -519,131 +491,82 @@ def analyze_resume_direct():
         if file.filename == "":
             return jsonify({"error": "No file selected"}), 400
 
-        # Validate file type
-        if file.mimetype not in ALLOWED_MIME_TYPES:
-            return jsonify({"error": "Unsupported file type"}), 400
+        # Check file size
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
 
-        # Read file content
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({"error": "File too large"}), 413
+
+        if not allowed_file(file.filename):
+            return jsonify({"error": "Invalid file type"}), 400
+
         file_content = file.read()
+        filename = file.filename.lower()
 
-        # Validate file size
-        if len(file_content) > MAX_FILE_SIZE:
-            return jsonify({"error": "File size too large"}), 400
-
-        # Extract text based on file type
         text = ""
-        if file.mimetype == "application/pdf":
+        if filename.endswith(".pdf"):
             text = analyzer.extract_text_from_pdf(file_content)
-        elif (
-            file.mimetype
-            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ):
+        elif filename.endswith((".docx", ".doc")):
             text = analyzer.extract_text_from_docx(file_content)
-        elif file.mimetype == "text/plain":
+        elif filename.endswith(".txt"):
             text = analyzer.extract_text_from_txt(file_content)
-        else:
-            return jsonify({"error": "Unsupported file type"}), 400
 
-        if not text or len(text) < 50:
-            return (
-                jsonify({"error": "Could not extract sufficient text from file"}),
-                400,
-            )
+        if not text or len(text.strip()) < 50:
+            return jsonify({"error": "Insufficient text"}), 400
 
-        print(f"Extracted text ({len(text)} characters), starting analysis...")
-
-        # Analyze the resume
-        analysis_result = analyzer.analyze_resume_text(text)
-
-        if not analysis_result:
-            return jsonify({"error": "Analysis returned no results"}), 500
+        result = analyzer.analyze_resume_text(text)
 
         return jsonify(
             {
                 "success": True,
-                "data": analysis_result,
-                "timestamp": datetime.now().isoformat(),
+                "data": result,
                 "filename": file.filename,
-                "fileSize": len(file_content),
+                "fileSize": file_size,
                 "extractedTextLength": len(text),
+                "timestamp": datetime.now().isoformat(),
             }
         )
 
     except Exception as e:
-        print(f"Direct resume analysis error: {str(e)}")
-        import traceback
-
+        print(f"Direct analysis error: {str(e)}")
         traceback.print_exc()
-        return jsonify({"error": f"Analysis failed: {str(e)}"}), 500
-
-
-@app.route("/backend/debug_extract", methods=["POST"])
-def debug_extract():
-    """Debug endpoint to see what's being extracted"""
-    if "file" not in request.files:
-        return jsonify({"error": "No file"}), 400
-
-    file = request.files["file"]
-    file_content = file.read()
-
-    # Extract text
-    text = analyzer.extract_text_from_pdf(file_content)
-
-    # Find sections for debugging
-    sections = {}
-    section_patterns = {
-        "education": r"EDUCATION\s*([\s\S]*?)(?=PROJECTS|SKILLS|$)",
-        "projects": r"PROJECTS\s*([\s\S]*?)(?=SKILLS|EDUCATION|$)",
-        "skills": r"SKILLS\s*([\s\S]*?)(?=CERTIFICATIONS|ACHIEVEMENTS|$)",
-        "certifications": r"CERTIFICATIONS\s*([\s\S]*?)(?=ACHIEVEMENTS|$)",
-        "achievements": r"ACHIEVEMENTS\s*([\s\S]*?)(?=DECLARATION|$)",
-    }
-
-    for section, pattern in section_patterns.items():
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        sections[section] = match.group(1)[:500] + "..." if match else "NOT FOUND"
-
-    return jsonify(
-        {
-            "full_text_preview": text[:1000] + "...",
-            "sections": sections,
-            "text_length": len(text),
-        }
-    )
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    groq_status = "configured" if groq_client else "not configured"
     return jsonify(
         {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "groq_status": groq_status,
+            "service": "resume-analyzer",
+            "groq_api_key_configured": bool(GROQ_API_KEY),
         }
     )
 
 
-# Error handling
-@app.errorhandler(413)
-def file_too_large(error):
-    return jsonify({"error": "File size too large"}), 413
-
-
-@app.errorhandler(400)
-def bad_request(error):
-    return jsonify({"error": "Bad request"}), 400
-
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({"error": "Internal server error"}), 500
+@app.route("/test", methods=["GET"])
+def test():
+    return jsonify(
+        {
+            "message": "Resume Analyzer API is working",
+            "timestamp": datetime.now().isoformat(),
+            "version": "1.0.0",
+        }
+    )
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"🚀 Starting Flask server on port {port}")
     print(
-        f"🔑 Groq API Status: {'✅ Configured' if groq_client else '❌ Not Configured'}"
+        f"""
+    ============================================
+    🚀 Resume Analyzer API
+    📍 Port: {port}
+    🤖 Groq API: {'✅ READY' if GROQ_API_KEY else '❌ NO KEY'}
+    ============================================
+    """
     )
     app.run(host="0.0.0.0", port=port, debug=True)

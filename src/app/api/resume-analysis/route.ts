@@ -11,9 +11,9 @@ export async function POST(request: NextRequest) {
         const userName = formData.get('userName') as string;
         const userEmail = formData.get('userEmail') as string;
 
-        if (!file || !interview_id || !userName || !userEmail) {
+        if (!file) {
             return NextResponse.json(
-                { error: 'Missing required fields' },
+                { error: 'No file provided' },
                 { status: 400 }
             );
         }
@@ -41,6 +41,8 @@ export async function POST(request: NextRequest) {
                 { status: 413 }
             );
         }
+
+        console.log(`📤 Uploading file: ${file.name} (${file.size} bytes)`);
 
         // Create FormData for backend request
         const backendFormData = new FormData();
@@ -79,7 +81,9 @@ export async function POST(request: NextRequest) {
         const frontendData = transformForFrontend(analysisResult.data, userName, userEmail);
 
         // Save to Supabase
-        await saveToSupabase(interview_id, userName, userEmail, frontendData, analysisResult.data);
+        if (interview_id && userName && userEmail) {
+            await saveToSupabase(interview_id, userName, userEmail, frontendData, analysisResult.data);
+        }
 
         return NextResponse.json({
             success: true,
@@ -115,9 +119,16 @@ export async function POST(request: NextRequest) {
 }
 
 function transformForFrontend(analysis: any, userName: string, userEmail: string) {
+    // Ensure projects have main_points array
+    const projects = (analysis.projects || []).map((proj: any) => ({
+        name: proj.name || '',
+        main_points: proj.main_points || [],
+        technologies: proj.technologies || []
+    }));
+
     return {
         education: analysis.education || [],
-        projects: analysis.projects || [],
+        projects: projects,
         experience: analysis.experience || { years: 0, level: 'Fresher' },
         skills: analysis.skills || {},
         certifications: analysis.certifications || [],

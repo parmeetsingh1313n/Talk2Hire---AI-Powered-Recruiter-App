@@ -3,8 +3,8 @@ import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Briefcase, Award, 
 
 interface Project {
     name: string;
-    main_points: string[];
-    technologies: string[];
+    main_points?: string[];
+    technologies?: string[];
 }
 
 interface Education {
@@ -459,58 +459,57 @@ const ResumeUploadDialog = ({
                                         </div>
                                     )}
 
-                                    {/* Projects Section */}
-                                    {analysisResult.data.projects.length > 0 && (
-                                        <div className="p-6 bg-gradient-to-br from-purple-50 to-violet-50 rounded-xl border border-purple-200">
-                                            <h3 className="font-semibold text-lg text-gray-900 mb-4 flex items-center gap-2">
-                                                <Code className="w-5 h-5 text-purple-600" />
-                                                Projects ({analysisResult.data.projects.length})
-                                            </h3>
-                                            <div className="space-y-4">
-                                                {analysisResult.data.projects.map((project, index) => (
-                                                    <div key={index} className="bg-white p-5 rounded-lg border border-purple-200 shadow-sm">
-                                                        <div className="flex items-start gap-3 mb-3">
-                                                            <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
-                                                                <span className="text-purple-700 font-bold text-sm">{index + 1}</span>
-                                                            </div>
-                                                            <h4 className="font-semibold text-gray-900 flex-1">{project.name}</h4>
-                                                        </div>
+                                                {/* Projects Section */}
+                                                {analysisResult.data.projects.length > 0 && (
+                                                    <div className="p-6 bg-gradient-to-br from-purple-50 to-violet-50 rounded-xl border border-purple-200">
+                                                        <h3 className="font-semibold text-lg text-gray-900 mb-4 flex items-center gap-2">
+                                                            <Code className="w-5 h-5 text-purple-600" />
+                                                            Projects ({analysisResult.data.projects.length})
+                                                        </h3>
+                                                        <div className="space-y-4">
+                                                            {analysisResult.data.projects.map((project, index) => (
+                                                                <div key={index} className="bg-white p-5 rounded-lg border border-purple-200 shadow-sm">
+                                                                    <div className="flex items-start gap-3 mb-3">
+                                                                        <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                                                                            <span className="text-purple-700 font-bold text-sm">{index + 1}</span>
+                                                                        </div>
+                                                                        <h4 className="font-semibold text-gray-900 flex-1">{project.name}</h4>
+                                                                    </div>
 
-                                                        {project.main_points.length > 0 && (
-                                                            <div className="mb-3 ml-11">
-                                                                <p className="text-xs font-medium text-gray-600 mb-2">Key Features:</p>
-                                                                <ul className="space-y-1">
-                                                                    {project.main_points.slice(0, 3).map((point, pointIndex) => (
-                                                                        <li key={pointIndex} className="flex items-start gap-2">
-                                                                            <span className="text-purple-600 mt-1">•</span>
-                                                                            <span className="text-sm text-gray-700">{point}</span>
-                                                                        </li>
-                                                                    ))}
-                                                                </ul>
-                                                            </div>
-                                                        )}
+                                                                    {project.main_points && project.main_points.length > 0 && (
+                                                                        <div className="mb-3 ml-11">
+                                                                            <p className="text-xs font-medium text-gray-600 mb-2">Key Features:</p>
+                                                                            <ul className="space-y-1">
+                                                                                {project.main_points.slice(0, 3).map((point, pointIndex) => (
+                                                                                    <li key={pointIndex} className="flex items-start gap-2">
+                                                                                        <span className="text-purple-600 mt-1">•</span>
+                                                                                        <span className="text-sm text-gray-700">{point}</span>
+                                                                                    </li>
+                                                                                ))}
+                                                                            </ul>
+                                                                        </div>
+                                                                    )}
 
-                                                        {project.technologies.length > 0 && (
-                                                            <div className="ml-11">
-                                                                <p className="text-xs font-medium text-gray-600 mb-2">Technologies:</p>
-                                                                <div className="flex flex-wrap gap-2">
-                                                                    {project.technologies.map((tech, techIndex) => (
-                                                                        <span
-                                                                            key={techIndex}
-                                                                            className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium border border-purple-200"
-                                                                        >
-                                                                            {tech}
-                                                                        </span>
-                                                                    ))}
+                                                                    {project.technologies && project.technologies.length > 0 && (
+                                                                        <div className="ml-11">
+                                                                            <p className="text-xs font-medium text-gray-600 mb-2">Technologies:</p>
+                                                                            <div className="flex flex-wrap gap-2">
+                                                                                {project.technologies.map((tech, techIndex) => (
+                                                                                    <span
+                                                                                        key={techIndex}
+                                                                                        className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium border border-purple-200"
+                                                                                    >
+                                                                                        {tech}
+                                                                                    </span>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
-                                                            </div>
-                                                        )}
+                                                            ))}
+                                                        </div>
                                                     </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
+                                                )}
                                     {/* Skills Section */}
                                     {Object.keys(analysisResult.data.skills).length > 0 && (
                                         <div className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200">
