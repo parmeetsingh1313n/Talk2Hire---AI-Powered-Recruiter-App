@@ -22,8 +22,6 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-print(f"🔑 Groq API Key: {GROQ_API_KEY[:15]}...")
-
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
@@ -108,6 +106,428 @@ class ResumeAnalyzer:
                 "jira",
             ],
         }
+
+        # STRONG Resume validation - very specific resume keywords
+        self.resume_keywords = [
+            "resume",
+            "cv",
+            "curriculum vitae",
+            "curriculum",
+            "vitae",
+            "experience",
+            "work experience",
+            "employment",
+            "work history",
+            "education",
+            "academic",
+            "qualifications",
+            "degrees",
+            "university",
+            "college",
+            "skills",
+            "technical skills",
+            "soft skills",
+            "expertise",
+            "competencies",
+            "projects",
+            "project experience",
+            "personal projects",
+            "certifications",
+            "certificates",
+            "licenses",
+            "achievements",
+            "awards",
+            "honors",
+            "recognition",
+            "languages",
+            "spoken languages",
+            "programming languages",
+            "summary",
+            "objective",
+            "profile",
+            "career objective",
+            "references",
+            "contact",
+            "phone",
+            "email",
+            "mobile",
+            "telephone",
+            "linkedin",
+            "github",
+            "portfolio",
+            "website",
+            "professional",
+            "career",
+            "employment history",
+            "work background",
+        ]
+
+        # Negative keywords - if these appear, likely NOT a resume
+        self.non_resume_keywords = [
+            "invoice",
+            "bill",
+            "receipt",
+            "payment",
+            "order",
+            "purchase",
+            "report",
+            "analysis",
+            "data",
+            "research",
+            "study",
+            "survey",
+            "contract",
+            "agreement",
+            "legal",
+            "terms",
+            "conditions",
+            "article",
+            "essay",
+            "paper",
+            "thesis",
+            "dissertation",
+            "letter",
+            "memo",
+            "memo",
+            "notice",
+            "announcement",
+            "manual",
+            "guide",
+            "instructions",
+            "tutorial",
+            "book",
+            "chapter",
+            "section",
+            "appendix",
+            "form",
+            "application",
+            "registration",
+            "enrollment",
+            "news",
+            "newsletter",
+            "bulletin",
+            "magazine",
+            "journal",
+            "menu",
+            "recipe",
+            "cooking",
+            "food",
+            "story",
+            "fiction",
+            "novel",
+            "poem",
+            "poetry",
+            "invoice number",
+            "bill to",
+            "ship to",
+            "due date",
+            "terms of service",
+            "privacy policy",
+            "copyright",
+            "financial statement",
+            "balance sheet",
+            "income statement",
+            "medical report",
+            "prescription",
+            "diagnosis",
+            "scientific paper",
+            "abstract",
+            "introduction",
+            "methodology",
+            "minutes",
+            "agenda",
+            "meeting notes",
+        ]
+
+        # Minimum thresholds
+        self.MIN_LENGTH = 300  # Minimum characters for a resume
+        self.MIN_KEYWORDS = 5  # Minimum resume keywords required
+        self.MAX_NON_RESUME_KEYWORDS = 2  # Maximum non-resume keywords allowed
+
+    def validate_resume_with_ai(self, text: str) -> dict:
+        """Use AI to validate if text is from a resume"""
+        try:
+            system_prompt = """You are a document validator. Your ONLY job is to determine if the provided text is from a RESUME/CV or not.
+
+A RESUME/CV typically contains:
+1. Personal/contact information (name, email, phone)
+2. Work experience/employment history with dates and positions
+3. Education background with degrees and institutions
+4. Skills section (technical skills, soft skills)
+5. Professional summary or objective
+6. May contain projects, certifications, achievements
+
+NOT a resume if it contains:
+- Invoices, bills, receipts, financial documents
+- Reports, research papers, articles
+- Contracts, legal documents
+- Letters, emails, memos
+- Books, manuals, guides
+- Forms, applications
+- News articles, blog posts
+- Stories, fiction, poetry
+- Menus, recipes
+- Any non-professional document
+
+Return ONLY this JSON format:
+{
+    "is_resume": true/false,
+    "confidence": 0-100,
+    "reason": "Brief explanation why",
+    "detected_sections": ["list", "of", "sections", "found"],
+    "issues": ["list", "of", "issues", "if", "any"]
+}"""
+
+            headers = {
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            }
+
+            data = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": f"Is this text from a RESUME/CV? Answer with JSON only.\n\nText:\n{text[:2000]}",
+                    },
+                ],
+                "temperature": 0.1,
+                "max_tokens": 500,
+                "response_format": {"type": "json_object"},
+            }
+
+            response = requests.post(
+                GROQ_API_URL, headers=headers, json=data, timeout=15
+            )
+
+            if response.status_code != 200:
+                print(f"❌ AI validation API error: {response.status_code}")
+                return {"is_resume": False, "reason": "AI validation failed"}
+
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
+
+            # Extract JSON
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            if json_match:
+                validation_result = json.loads(json_match.group(0))
+                return validation_result
+            else:
+                return {"is_resume": False, "reason": "Invalid AI response"}
+
+        except Exception as e:
+            print(f"❌ AI validation error: {str(e)}")
+            return {"is_resume": False, "reason": f"AI validation error: {str(e)}"}
+
+    def is_valid_resume(self, text: str) -> dict:
+        """Check if the extracted text is a valid resume using MULTIPLE methods"""
+        print("🔍 STRICT Resume validation started...")
+
+        try:
+            # Check 1: Minimum length check (resumes are usually longer)
+            if len(text) < self.MIN_LENGTH:
+                return {
+                    "is_resume": False,
+                    "score": 0,
+                    "reason": f"Document too short ({len(text)} chars). Minimum {self.MIN_LENGTH} characters required for a resume.",
+                    "method": "length_check",
+                }
+
+            text_lower = text.lower()
+
+            # Check 2: Count resume-specific keywords
+            resume_keyword_count = 0
+            found_resume_keywords = []
+            for keyword in self.resume_keywords:
+                if keyword in text_lower:
+                    resume_keyword_count += 1
+                    found_resume_keywords.append(keyword)
+
+            # Check 3: Count NON-resume keywords (negative indicators)
+            non_resume_keyword_count = 0
+            found_non_resume_keywords = []
+            for keyword in self.non_resume_keywords:
+                if keyword in text_lower:
+                    non_resume_keyword_count += 1
+                    found_non_resume_keywords.append(keyword)
+
+            # Check 4: Look for specific resume sections
+            has_contact = bool(
+                re.search(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", text)
+            ) or bool(
+                re.search(
+                    r"(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}", text
+                )
+            )
+
+            has_experience = any(
+                word in text_lower
+                for word in [
+                    "experience",
+                    "work history",
+                    "employment",
+                    "work experience",
+                    "professional experience",
+                ]
+            )
+            has_education = any(
+                word in text_lower
+                for word in [
+                    "education",
+                    "academic",
+                    "qualifications",
+                    "degree",
+                    "university",
+                    "college",
+                ]
+            )
+            has_skills = any(
+                word in text_lower
+                for word in [
+                    "skills",
+                    "technical skills",
+                    "expertise",
+                    "competencies",
+                    "proficiencies",
+                ]
+            )
+
+            # Check 5: Look for structured formatting (resumes often have sections with colons or bold text)
+            lines = text.split("\n")
+            structured_lines = 0
+            for line in lines:
+                if re.search(r"^[A-Z][a-zA-Z\s]+:", line) or re.search(
+                    r"^[A-Z][a-zA-Z\s]+\s+[A-Z]", line
+                ):
+                    structured_lines += 1
+
+            # Check 6: Look for dates in experience/education (resumes have dates)
+            date_patterns = [
+                r"\b(19|20)\d{2}\b",  # Years like 2020, 2019
+                r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\b",  # Month Year
+                r"\b\d{1,2}/\d{4}\b",  # MM/YYYY
+                r"\b\d{4}\s*[-–]\s*(Present|Current|\d{4})\b",  # Date ranges
+            ]
+
+            has_dates = any(
+                re.search(pattern, text, re.IGNORECASE) for pattern in date_patterns
+            )
+
+            # Check 7: Look for bullet points (resumes use bullet points)
+            has_bullets = (
+                text.count("•") > 2 or text.count("- ") > 2 or text.count("* ") > 2
+            )
+
+            # SCORING SYSTEM (0-100)
+            score = 0
+
+            # Length score (max 10)
+            length_score = min(len(text) / 500, 10)
+            score += length_score
+
+            # Resume keywords score (max 30)
+            keyword_score = min(resume_keyword_count * 3, 30)
+            score += keyword_score
+
+            # Section score (max 30)
+            section_score = 0
+            if has_contact:
+                section_score += 5
+            if has_experience:
+                section_score += 10
+            if has_education:
+                section_score += 10
+            if has_skills:
+                section_score += 5
+            score += section_score
+
+            # Structure score (max 20)
+            structure_score = min(structured_lines * 2, 10)
+            if has_dates:
+                structure_score += 5
+            if has_bullets:
+                structure_score += 5
+            score += min(structure_score, 20)
+
+            # Penalty for non-resume keywords (max -20)
+            penalty = min(non_resume_keyword_count * 5, 20)
+            score = max(0, score - penalty)
+
+            print(f"📊 STRICT VALIDATION RESULTS:")
+            print(f"   Total length: {len(text)} chars")
+            print(
+                f"   Resume keywords found: {resume_keyword_count} ({', '.join(found_resume_keywords[:5])})"
+            )
+            print(
+                f"   Non-resume keywords found: {non_resume_keyword_count} ({', '.join(found_non_resume_keywords[:5])})"
+            )
+            print(f"   Has contact: {has_contact}")
+            print(f"   Has experience: {has_experience}")
+            print(f"   Has education: {has_education}")
+            print(f"   Has skills: {has_skills}")
+            print(f"   Has dates: {has_dates}")
+            print(f"   Has bullets: {has_bullets}")
+            print(f"   Structured lines: {structured_lines}")
+            print(f"   RAW SCORE: {score}/100")
+
+            # STRICT DECISION RULES
+            issues = []
+
+            if non_resume_keyword_count > self.MAX_NON_RESUME_KEYWORDS:
+                issues.append(
+                    f"Contains {non_resume_keyword_count} non-resume keywords: {', '.join(found_non_resume_keywords[:3])}"
+                )
+
+            if not has_experience:
+                issues.append("Missing work experience section")
+
+            if not has_education:
+                issues.append("Missing education section")
+
+            if resume_keyword_count < self.MIN_KEYWORDS:
+                issues.append(
+                    f"Too few resume keywords (found {resume_keyword_count}, need {self.MIN_KEYWORDS})"
+                )
+
+            # FINAL DECISION - VERY STRICT
+            if score < 40:
+                return {
+                    "is_resume": False,
+                    "score": score,
+                    "reason": f"❌ This doesn't appear to be a resume. Score: {score}/100",
+                    "issues": issues,
+                    "method": "strict_validation",
+                    "details": {
+                        "length": len(text),
+                        "resume_keywords": resume_keyword_count,
+                        "non_resume_keywords": non_resume_keyword_count,
+                        "has_experience": has_experience,
+                        "has_education": has_education,
+                        "has_skills": has_skills,
+                    },
+                }
+            elif score < 60:
+                # Borderline case - use AI validation
+                print("⚠️ Borderline case, using AI validation...")
+                ai_result = self.validate_resume_with_ai(text[:3000])
+                return ai_result
+            else:
+                return {
+                    "is_resume": True,
+                    "score": score,
+                    "reason": f"✅ Valid resume detected. Score: {score}/100",
+                    "issues": [],
+                    "method": "strict_validation",
+                }
+
+        except Exception as e:
+            print(f"❌ Resume validation error: {str(e)}")
+            return {
+                "is_resume": False,
+                "reason": f"Validation error: {str(e)}",
+                "method": "error",
+            }
 
     def extract_text_from_pdf(self, file_content: bytes) -> str:
         """Extract text from PDF using pdfplumber"""
@@ -376,6 +796,7 @@ def index():
         {
             "message": "Resume Analyzer API",
             "status": "running",
+            "validation": "STRICT ENABLED",
             "endpoints": {
                 "POST /upload": "Upload and analyze resume",
                 "POST /analyze": "Analyze resume text",
@@ -429,6 +850,38 @@ def upload_file():
         if not text or len(text.strip()) < 50:
             return jsonify({"error": "Could not extract sufficient text"}), 400
 
+        # STRICT VALIDATION - Check if it's a resume
+        print("🔍 STRICT Resume validation started...")
+        validation_result = analyzer.is_valid_resume(text)
+
+        if not validation_result.get("is_resume", False):
+            reason = validation_result.get(
+                "reason", "This doesn't appear to be a resume."
+            )
+            details = validation_result.get("details", {})
+            issues = validation_result.get("issues", [])
+
+            error_msg = f"❌ {reason}"
+            if issues:
+                error_msg += f" Issues: {', '.join(issues[:3])}"
+
+            return (
+                jsonify(
+                    {
+                        "error": error_msg,
+                        "validation_score": validation_result.get("score", 0),
+                        "validation_details": details,
+                        "is_resume": False,
+                        "success": False,
+                    }
+                ),
+                400,
+            )
+
+        print(
+            f"✅ Document validated as resume (score: {validation_result.get('score', 0)}/100)"
+        )
+
         # Analyze
         result = analyzer.analyze_resume_text(text)
 
@@ -440,6 +893,7 @@ def upload_file():
                 "fileSize": file_size,
                 "extractedTextLength": len(text),
                 "timestamp": datetime.now().isoformat(),
+                "validation": validation_result,
             }
         )
 
@@ -463,10 +917,35 @@ def analyze():
         if len(text) < 50:
             return jsonify({"error": "Text too short"}), 400
 
+        # STRICT VALIDATION
+        print("🔍 STRICT Resume validation started...")
+        validation_result = analyzer.is_valid_resume(text)
+
+        if not validation_result.get("is_resume", False):
+            reason = validation_result.get(
+                "reason", "This doesn't appear to be a resume."
+            )
+            return (
+                jsonify(
+                    {
+                        "error": f"❌ {reason}",
+                        "validation_score": validation_result.get("score", 0),
+                        "is_resume": False,
+                        "success": False,
+                    }
+                ),
+                400,
+            )
+
         result = analyzer.analyze_resume_text(text)
 
         return jsonify(
-            {"success": True, "data": result, "timestamp": datetime.now().isoformat()}
+            {
+                "success": True,
+                "data": result,
+                "timestamp": datetime.now().isoformat(),
+                "validation": validation_result,
+            }
         )
 
     except Exception as e:
@@ -514,6 +993,38 @@ def analyze_resume_direct():
         if not text or len(text.strip()) < 50:
             return jsonify({"error": "Insufficient text"}), 400
 
+        # STRICT VALIDATION
+        print("🔍 STRICT Resume validation started...")
+        validation_result = analyzer.is_valid_resume(text)
+
+        if not validation_result.get("is_resume", False):
+            reason = validation_result.get(
+                "reason", "This doesn't appear to be a resume."
+            )
+            details = validation_result.get("details", {})
+            issues = validation_result.get("issues", [])
+
+            error_msg = f"❌ {reason}"
+            if issues:
+                error_msg += f" Issues: {', '.join(issues[:3])}"
+
+            return (
+                jsonify(
+                    {
+                        "error": error_msg,
+                        "validation_score": validation_result.get("score", 0),
+                        "validation_details": details,
+                        "is_resume": False,
+                        "success": False,
+                    }
+                ),
+                400,
+            )
+
+        print(
+            f"✅ Document validated as resume (score: {validation_result.get('score', 0)}/100)"
+        )
+
         result = analyzer.analyze_resume_text(text)
 
         return jsonify(
@@ -524,6 +1035,7 @@ def analyze_resume_direct():
                 "fileSize": file_size,
                 "extractedTextLength": len(text),
                 "timestamp": datetime.now().isoformat(),
+                "validation": validation_result,
             }
         )
 
@@ -540,6 +1052,7 @@ def health_check():
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
             "service": "resume-analyzer",
+            "validation": "STRICT ENABLED",
             "groq_api_key_configured": bool(GROQ_API_KEY),
         }
     )
@@ -551,7 +1064,8 @@ def test():
         {
             "message": "Resume Analyzer API is working",
             "timestamp": datetime.now().isoformat(),
-            "version": "1.0.0",
+            "version": "2.0.0",
+            "validation": "STRICT",
         }
     )
 
@@ -561,9 +1075,10 @@ if __name__ == "__main__":
     print(
         f"""
     ============================================
-    🚀 Resume Analyzer API
+    🚀 Resume Analyzer API (STRICT VALIDATION)
     📍 Port: {port}
     🤖 Groq API: {'✅ READY' if GROQ_API_KEY else '❌ NO KEY'}
+    🔍 Resume Validation: ✅ STRICT ENABLED
     ============================================
     """
     )
