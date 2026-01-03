@@ -19,9 +19,7 @@ CORS(app)
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 # Groq API Configuration
-GROQ_API_KEY = os.getenv(
-    "GROQ_API_KEY"
-)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 print(f"🔑 Groq API Key: {GROQ_API_KEY[:15]}...")
