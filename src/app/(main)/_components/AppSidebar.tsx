@@ -11,20 +11,25 @@ import {
     SidebarMenuItem,
     useSidebar,
 } from "@/components/ui/sidebar";
-import { Plus, PanelRightOpen } from "lucide-react";
+import { PanelRightOpen } from "lucide-react";
 import { Federant } from "next/font/google";
 import { SidebarOptions } from "../../../../services/Constants";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 const federant = Federant({
     subsets: ['latin'],
     weight: ['400'],
 });
 
+// Import the RotatingText component
+import RotatingText from './RotatingText';
+
 export function AppSidebar() {
     const pathname = usePathname();
     const { toggleSidebar } = useSidebar();
+    const [hover, setHover] = useState(false);
 
     return (
         <Sidebar className="bg-gradient-to-br from-slate-50 via-slate-100 to-slate-300 text-white">
@@ -51,15 +56,72 @@ export function AppSidebar() {
                         </span>
                     </div>
 
-                    <Link href={'/dashboard/create-interview'}>
-                    <Button className="w-full h-15 flex items-center justify-center gap-3 rounded-2xl font-medium bg-gradient-to-r from-cyan-500 via-sky-600 to-blue-600 hover:from-cyan-500 hover:via-sky-600 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02] cursor-pointer text-lg relative overflow-hidden group">
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 group-hover:animate-pulse" />
-                        <div className="relative z-10 p-2 rounded-xl bg-white/20 backdrop-blur-sm">
-                            <Plus className="w-6 h-6" />
+                    {/* Rotating Text CTA - Purely decorative, no click behavior */}
+                    <div
+                        className="relative group"
+                        onMouseEnter={() => setHover(true)}
+                        onMouseLeave={() => setHover(false)}
+                    >
+                        {/* Removed Link wrapper, now just decorative div */}
+                        <div className="relative w-full h-20 flex items-center justify-center rounded-2xl overflow-hidden transition-all duration-700">
+                            {/* Animated gradient background */}
+                            <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-sky-600/10 to-blue-600/10 group-hover:from-cyan-500/15 group-hover:via-sky-600/15 group-hover:to-blue-600/15 transition-all duration-500" />
+
+                            {/* Pulsing border effect */}
+                            <div className="absolute inset-0 border-2 border-transparent group-hover:border-cyan-400/20 rounded-2xl transition-all duration-500" />
+
+                            {/* Main content container */}
+                            <div className="relative z-10 flex flex-col items-center justify-center w-full px-4 py-5">
+                                {/* Static text with gradient effect */}
+                                <div className="mb-2 mt-3">
+                                    <span className="text-lg font-bold bg-gradient-to-r from-cyan-600 via-blue-600 to-sky-600 bg-clip-text text-transparent">
+                                        Create AI-Powered
+                                    </span>
+                                </div>
+
+                                {/* Rotating text - Fixed to prevent double text */}
+                                <div className="h-10 flex items-center justify-center relative">
+                                    <RotatingText
+                                        texts={[
+                                            'Video Interview',
+                                            'Audio Screening',
+                                            'Recruitment Process',
+                                            'Candidate Evaluation',
+                                            'Smart Hiring',
+                                            'AI Assessment'
+                                        ]}
+                                        mainClassName="px-4 py-2 bg-gradient-to-r from-cyan-100/50 via-blue-100/50 to-sky-100/50 backdrop-blur-sm text-cyan-800 font-bold rounded-xl overflow-hidden h-10 flex items-center justify-center min-w-[200px] border border-cyan-200/30 relative"
+                                        staggerFrom={"last"}
+                                        initial={{ y: "100%", opacity: 0 }}
+                                        animate={{ y: 0, opacity: 1 }}
+                                        exit={{ y: "-120%", opacity: 0 }}
+                                        staggerDuration={0.03}
+                                        splitLevelClassName="overflow-hidden"
+                                        transition={{
+                                            type: "spring",
+                                            damping: 25,
+                                            stiffness: 350,
+                                            mass: 0.5
+                                        }}
+                                        rotationInterval={2200}
+                                        auto={true}
+                                    />
+                                </div>
+
+                                {/* Subtle arrow indicator */}
+                                <div className="mt-2 transform transition-transform duration-300 group-hover:translate-y-0.5">
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-1.5 h-1.5 border-r-2 border-b-2 border-cyan-500 rotate-45 opacity-60" />
+                                        <div className="w-1.5 h-1.5 border-r-2 border-b-2 border-blue-500 rotate-45 opacity-60" />
+                                        <div className="w-1.5 h-1.5 border-r-2 border-b-2 border-sky-500 rotate-45 opacity-60" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Shimmer effect on hover */}
+                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/0 to-transparent -skew-x-12 opacity-0 group-hover:opacity-50 group-hover:animate-pulse transition-opacity duration-500" />
                         </div>
-                        <span className="relative z-10">Create Interview</span>
-                        </Button>
-                    </Link>
+                    </div>
                 </SidebarHeader>
 
                 <SidebarContent className="py-7 mb-3">
@@ -140,5 +202,5 @@ export function AppSidebar() {
                 </SidebarFooter>
             </div>
         </Sidebar>
-    )
+    );
 }

@@ -2,9 +2,9 @@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ArrowLeft, MessageCircleWarning } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { ArrowLeft, Calendar, Clock, MessageCircleWarning } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation"; // Add useSearchParams
+import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import Form from "./_components/Form";
 import InterviewLink from "./_components/InterviewLink";
@@ -12,6 +12,7 @@ import QuestionList from "./_components/QuestionList";
 
 function CreateInterview() {
     const router = useRouter();
+    const searchParams = useSearchParams(); // Get search params
     const [step, setStep] = useState(1);
     const [showBackAlert, setShowBackAlert] = useState(false);
     const [showDashboardAlert, setShowDashboardAlert] = useState(false);
@@ -21,6 +22,10 @@ function CreateInterview() {
         jobDescription?: string;
         duration?: string;
         type?: string;
+        schedule_date?: string;
+        schedule_time?: string;
+        validity?: number;
+        service_type?: string; // Add service_type
         [key: string]: any;
     };
 
@@ -52,6 +57,25 @@ function CreateInterview() {
         }
     }, []);
 
+    // Get service_type from URL and set it in formData
+    useEffect(() => {
+        const typeFromUrl = searchParams.get('type');
+        if (typeFromUrl && (typeFromUrl === 'video' || typeFromUrl === 'audio')) {
+            setFormData(prev => ({
+                ...prev,
+                service_type: typeFromUrl
+            }));
+
+            // Also save to localStorage
+            const savedFormData = localStorage.getItem('interview_form_data');
+            if (savedFormData) {
+                const parsedData = JSON.parse(savedFormData);
+                parsedData.service_type = typeFromUrl;
+                localStorage.setItem('interview_form_data', JSON.stringify(parsedData));
+            }
+        }
+    }, [searchParams]);
+
     // Save form data to localStorage whenever it changes
     useEffect(() => {
         if (Object.keys(formData).length > 0) {
@@ -64,21 +88,46 @@ function CreateInterview() {
         localStorage.setItem('interview_step', step.toString());
     }, [step]);
 
-    const onHandleInputChange = (field: string, value: any) => {
-        const updatedFormData = {
-            ...formData,
+    const onHandleInputChange = useCallback((field: string, value: any) => {
+        setFormData(prev => ({
+            ...prev,
             [field]: value
-        };
+        }));
+    }, []);
 
-        setFormData(updatedFormData);
-        console.log(updatedFormData);
-    }
 
     const onGoToNext = () => {
-        if (!formData?.jobPosition || !formData?.jobDescription || !formData?.duration || !formData?.type) {
-            toast("Please fill all the details !")
+        // Validate required fields
+        const requiredFields = ['jobPosition', 'jobDescription', 'duration', 'type'];
+        for (const field of requiredFields) {
+            if (!formData?.[field]) {
+                toast(`Please fill in ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`);
+                return;
+            }
+        }
+
+        // Validate schedule date and time if provided
+        if (formData?.schedule_date && formData?.schedule_time) {
+            const scheduleDate = new Date(formData.schedule_date);
+            const [hours, minutes] = formData.schedule_time.split(':').map(Number);
+            scheduleDate.setHours(hours, minutes, 0, 0);
+
+            const now = new Date();
+            // Add 5 minutes buffer for immediate interviews
+            const bufferTime = new Date(now.getTime() + 5 * 60000);
+
+            if (scheduleDate < bufferTime) {
+                toast("Schedule time must be at least 5 minutes from now");
+                return;
+            }
+        }
+
+        // Validate validity period if provided
+        if (formData?.validity !== undefined && formData.validity < 30) {
+            toast("Validity period must be at least 30 minutes");
             return;
         }
+
         setStep(step + 1);
     }
 

@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, Clock, Download, Share2, Star, Home, Mail, User, Briefcase, Award } from "lucide-react";
-
 import { supabase } from "../../../../../services/supabaseClient";
 import { DetailedReportDialog } from "./_components/DetailedReportDialog";
 
@@ -43,17 +42,47 @@ export default function InterviewCompleted() {
 
     const fetchFeedback = async () => {
         try {
-            const { data, error } = await supabase
+            const { data, error, status } = await supabase
                 .from('Interview-Feedback')
                 .select('*')
                 .eq('interview_id', interviewId)
-                .single();
+                .maybeSingle(); // Use maybeSingle instead of single
 
-            if (data && data.feedback) {
-                setFeedback(data.feedback);
+            console.log('Query status:', status);
+
+            if (error) {
+                console.error('Supabase error details:', {
+                    message: error.message,
+                    code: error.code,
+                    details: error.details
+                });
+                return;
             }
+
+            if (!data) {
+                console.log('No record found for this interview ID');
+                return;
+            }
+
+            console.log('Full record:', data);
+
+            // Parse the feedback if it's stored as string
+            let feedbackData = data.feedback;
+            if (typeof feedbackData === 'string') {
+                try {
+                    feedbackData = JSON.parse(feedbackData);
+                } catch (parseError) {
+                    console.error('Failed to parse feedback JSON:', parseError);
+                    return;
+                }
+            }
+
+            if (feedbackData) {
+                setFeedback(feedbackData);
+            }
+
         } catch (error) {
-            console.error('Error fetching feedback:', error);
+            console.error('Unexpected error:', error);
         } finally {
             setLoading(false);
         }
@@ -249,20 +278,20 @@ export default function InterviewCompleted() {
                                 <DetailedReportDialog
                                     interviewId={interviewId}
                                     trigger={
-                                        <Button className="w-full justify-start gap-2" variant="outline">
+                                        <Button className="w-full justify-start gap-2 cursor-pointer" variant="outline">
                                             <Download className="w-4 h-4" />
                                             View Detailed Report
                                         </Button>
                                     }
                                 />
 
-                                <Button className="w-full justify-start gap-2" variant="outline">
+                                <Button className="w-full justify-start gap-2 cursor-pointer" variant="outline">
                                     <Share2 className="w-4 h-4" />
                                     Share Results
                                 </Button>
 
                                 <Button
-                                    className="w-full justify-start gap-2"
+                                    className="w-full justify-start gap-2 cursor-pointer"
                                     variant="outline"
                                     onClick={() => router.push('/')}
                                 >

@@ -24,6 +24,10 @@ type QuestionListProps = {
         jobDescription?: string;
         duration?: string;
         type?: string;
+        schedule_date?: string;
+        schedule_time?: string;
+        validity?: number;
+        service_type?: string; // Add this line
     };
     onGoToForm: () => void;
     onQuestionsGenerated: () => void;
@@ -151,21 +155,27 @@ const QuestionList = ({ formData, onGoToForm, onQuestionsGenerated, onInterviewF
         toast.success("New question added successfully!");
     };
 
+    // In the onFinish function of QuestionList component, update to:
     const onFinish = async () => {
         setSaveLoading(true);
         try {
             const interview_id = uuidv4();
 
+            // Convert schedule_date and schedule_time to proper format for database
+            const interviewData = {
+                ...formData,
+                questionList: questionList,
+                userEmail: user?.email,
+                interview_id: interview_id,
+                schedule_date: formData.schedule_date || null,
+                schedule_time: formData.schedule_time || null,
+                validity: formData.validity || 1440,
+                service_type: formData.service_type || 'audio'
+            };
+
             const { data, error } = await supabase
                 .from('Interviews')
-                .insert([
-                    {
-                        ...formData,
-                        questionList: questionList,
-                        userEmail: user?.email,
-                        interview_id: interview_id
-                    },
-                ])
+                .insert([interviewData])
                 .select();
 
             if (error) {
@@ -183,9 +193,7 @@ const QuestionList = ({ formData, onGoToForm, onQuestionsGenerated, onInterviewF
         } finally {
             setSaveLoading(false);
         }
-        
     }
-
     const questionTypes = ["Technical", "Behavioral", "Situational", "General", "Problem-solving"];
 
     return (

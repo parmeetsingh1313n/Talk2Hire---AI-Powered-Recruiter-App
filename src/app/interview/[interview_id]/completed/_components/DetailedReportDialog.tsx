@@ -151,7 +151,8 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                 {trigger || <Button variant="outline">See Detailed Report</Button>}
             </DrawerTrigger>
             <DrawerContent className="max-h-[90vh] overflow-hidden">
-                <div className="overflow-y-auto">
+                {/* Enable horizontal scrolling for the entire drawer content */}
+                <div className="overflow-y-auto overflow-x-hidden">
                     <DrawerHeader className="text-left pb-4 border-b">
                         <div className="flex items-center justify-between">
                             <div>
@@ -236,26 +237,27 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                                 <Accordion type="single" collapsible className="w-full">
                                     {conversationHistory.map((record, index) => (
                                         <AccordionItem key={record.id || index} value={`item-${record.id || index}`}>
-                                            <AccordionTrigger className="hover:no-underline">
-                                                <div className="flex items-start gap-4 text-left">
+                                            <AccordionTrigger className="hover:no-underline px-4">
+                                                <div className="flex items-start gap-4 text-left w-full">
                                                     <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                                                         <span className="text-sm font-bold text-blue-600">
                                                             {record.question_sequence}
                                                         </span>
                                                     </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <Badge variant="outline" className="text-xs">
+                                                    <div className="flex-1 min-w-0 overflow-hidden">
+                                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                            <Badge variant="outline" className="text-xs shrink-0">
                                                                 {record.question_type}
                                                             </Badge>
-                                                            <div className="flex items-center gap-1">
+                                                            <div className="flex items-center gap-1 shrink-0">
                                                                 <Star className="w-3 h-3 text-yellow-500" />
                                                                 <span className={`text-sm font-semibold ${getRatingColor(record.overall_rating || 0)}`}>
                                                                     {record.overall_rating}/10
                                                                 </span>
                                                             </div>
                                                         </div>
-                                                        <p className="text-sm font-medium truncate">
+                                                        {/* Make question text wrap properly */}
+                                                        <p className="text-sm font-medium break-words whitespace-normal line-clamp-2 text-left">
                                                             {record.ai_question}
                                                         </p>
                                                     </div>
@@ -270,7 +272,7 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                                                                 <MessageCircle className="w-4 h-4" />
                                                                 Your Answer
                                                             </h4>
-                                                            <div className="bg-white p-3 rounded border text-sm">
+                                                            <div className="bg-white p-3 rounded border text-sm break-words whitespace-pre-wrap">
                                                                 {record.candidate_answer || "No answer provided"}
                                                             </div>
                                                         </div>
@@ -279,7 +281,7 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                                                                 <CheckCircle2 className="w-4 h-4" />
                                                                 Expected Answer
                                                             </h4>
-                                                            <div className="bg-green-50 p-3 rounded border text-sm">
+                                                            <div className="bg-green-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
                                                                 {record.expected_answer}
                                                             </div>
                                                         </div>
@@ -292,7 +294,7 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                                                                 <Users className="w-4 h-4" />
                                                                 Interviewer's Response
                                                             </h4>
-                                                            <div className="bg-blue-50 p-3 rounded border text-sm">
+                                                            <div className="bg-blue-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
                                                                 {record.ai_response}
                                                             </div>
                                                         </div>
@@ -321,7 +323,7 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                                                             <AlertCircle className="w-4 h-4" />
                                                             Improvement Feedback
                                                         </h4>
-                                                        <div className="bg-yellow-50 p-3 rounded border text-sm">
+                                                        <div className="bg-yellow-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
                                                             {record.improvement_feedback}
                                                         </div>
                                                     </div>
@@ -333,7 +335,7 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                                                                 <Lightbulb className="w-4 h-4" />
                                                                 Key Insights
                                                             </h4>
-                                                            <div className="bg-purple-50 p-3 rounded border text-sm">
+                                                            <div className="bg-purple-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
                                                                 {record.analysis_insights}
                                                             </div>
                                                         </div>

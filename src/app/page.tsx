@@ -228,15 +228,6 @@ export default function Home() {
               ))}
             </div>
           </div>
-
-          <div className="absolute -top-4 -right-4 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg flex items-center gap-2 z-30">
-            <motion.div
-              className="w-2 h-2 bg-white rounded-full"
-              animate={{ scale: [1, 1.2, 1], opacity: [1, 0.7, 1] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
-            />
-            AI Active
-          </div>
         </div>
       </motion.div>
     );

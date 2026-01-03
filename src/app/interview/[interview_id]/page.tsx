@@ -1,7 +1,7 @@
 "use client"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Clock, Video, CheckCircle, Wifi, Camera, Mic, Play, Shield, Star, MonitorUp, Mail, User, Briefcase, Code, Award } from "lucide-react";
+import { Clock, Video, CheckCircle, Wifi, Camera, Mic, Play, Shield, Star, MonitorUp, Mail, User, Briefcase, Code, Award, Calendar, Lock, Loader2, AlertCircle } from "lucide-react";
 import { Federant } from "next/font/google";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
@@ -9,6 +9,18 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "../../../../services/supabaseClient";
 import ResumeUploadDialog from "../_components/ResumeUploadDialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+// 👇 IMPORT THE VALIDATION SERVICE
+import { ValidateCandidateService } from "../../../../services/validateCandidateService";
 
 const federant = Federant({ subsets: ['latin'], weight: ['400'], });
 
@@ -17,6 +29,11 @@ interface InterviewData {
     jobDescription: string;
     duration: string;
     type: string;
+    schedule_date: string | null;
+    schedule_time: string | null;
+    validity: number | null;
+    created_at: string;
+    service_type?: string;
 }
 
 interface Project {
@@ -80,6 +97,25 @@ interface ResumeAnalysisData {
     };
 }
 
+// Helper function to combine date and time
+const combineDateTime = (dateStr: string | null, timeStr: string | null): Date | null => {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    if (timeStr) {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        date.setHours(hours, minutes, 0, 0);
+    } else {
+        date.setHours(0, 0, 0, 0);
+    }
+    return date;
+};
+
+// Email validation function
+const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+};
+
 function Interview() {
     const { interview_id } = useParams();
     const router = useRouter();
@@ -92,6 +128,11 @@ function Interview() {
     const [resumeData, setResumeData] = useState<ResumeData | null>(null);
     const [showResumeDialog, setShowResumeDialog] = useState(false);
     const [storedAnalysisData, setStoredAnalysisData] = useState<ResumeAnalysisData | null>(null);
+    const [isInterviewAvailable, setIsInterviewAvailable] = useState(true);
+    const [timeUntilAvailable, setTimeUntilAvailable] = useState("");
+    const [showScheduleAlert, setShowScheduleAlert] = useState(false);
+    // 👇 ADDED ERROR STATE
+    const [emailValidationError, setEmailValidationError] = useState<string | null>(null);
 
     useEffect(() => {
         interview_id && GetInterviewDetails();
@@ -102,80 +143,158 @@ function Interview() {
         try {
             let { data: Interviews, error } = await supabase
                 .from('Interviews')
-                .select("jobPosition,jobDescription,duration,type")
+                .select("jobPosition, jobDescription, duration, type, schedule_date, schedule_time, validity, created_at, service_type")
                 .eq('interview_id', interview_id);
 
-            setInterviewData(Interviews?.[0]);
+            const interview = Interviews?.[0];
+            setInterviewData(interview);
+
+            if (interview?.schedule_date) {
+                checkInterviewAvailability(interview);
+            }
+
             setLoading(false);
             if (Interviews?.length == 0) {
-                toast('Incorrect Interview Link')
+                toast('Incorrect Interview Link');
                 return;
             }
         }
         catch (e) {
             setLoading(false);
-            toast('Incorrect Interview Link')
+            toast('Incorrect Interview Link');
         }
     }
 
-    const handleContinue = () => {
+    const checkInterviewAvailability = (interview: any) => {
+        const now = new Date();
+        const scheduleDateTime = combineDateTime(interview.schedule_date, interview.schedule_time);
+        if (!scheduleDateTime) {
+            setIsInterviewAvailable(true);
+            return;
+        }
+
+        const validityMinutes = interview.validity || 1440;
+        const endTime = new Date(scheduleDateTime.getTime() + (validityMinutes * 60000));
+
+        if (now < scheduleDateTime) {
+            setIsInterviewAvailable(false);
+            updateTimeUntilAvailable(scheduleDateTime, now);
+
+            const interval = setInterval(() => {
+                const newNow = new Date();
+                if (newNow >= scheduleDateTime) {
+                    setIsInterviewAvailable(true);
+                    clearInterval(interval);
+                } else {
+                    updateTimeUntilAvailable(scheduleDateTime, newNow);
+                }
+            }, 1000);
+
+            return () => clearInterval(interval);
+        } else if (now > endTime) {
+            setIsInterviewAvailable(false);
+            setTimeUntilAvailable("Interview link has expired");
+        } else {
+            setIsInterviewAvailable(true);
+            const remainingTime = Math.floor((endTime.getTime() - now.getTime()) / 60000);
+            setTimeUntilAvailable(`Available for ${remainingTime} more minutes`);
+        }
+    };
+
+    const updateTimeUntilAvailable = (scheduleDate: Date, currentTime: Date) => {
+        const diff = scheduleDate.getTime() - currentTime.getTime();
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+        let timeString = "";
+        if (days > 0) timeString += `${days}d `;
+        if (hours > 0) timeString += `${hours}h `;
+        if (minutes > 0) timeString += `${minutes}m `;
+        if (seconds > 0 && days === 0) timeString += `${seconds}s`;
+
+        setTimeUntilAvailable(`Starts in ${timeString.trim()}`);
+    };
+
+    // 🔴 UPDATED: Handle Continue with Database Validation
+    const handleContinue = async () => {
         if (!userName || !email) {
             toast('Please fill in all required fields');
             return;
         }
-        setShowResumeDialog(true);
+
+        if (!isInterviewAvailable && interviewData?.schedule_date) {
+            setShowScheduleAlert(true);
+            return;
+        }
+
+        // 1. Local Regex Validation
+        if (!validateEmail(email)) {
+            toast.error('Please enter a valid email address');
+            setEmailValidationError('Please enter a valid email address');
+            return;
+        }
+
+        // 2. Supabase Table Validation
+        setLoading(true); // Show loading state on button
+        try {
+            const validationResult = await ValidateCandidateService.validateCandidateEmail(
+                interview_id as string,
+                email
+            );
+
+            if (!validationResult.isValid) {
+                // Access Denied Logic
+                toast.error(validationResult.message || "Access Denied: Email not authorized.");
+                setEmailValidationError(validationResult.message);
+                setLoading(false);
+                return; // STOP execution
+            }
+
+            // If we get here, the email is valid and authorized
+            setEmailValidationError(null);
+            setShowResumeDialog(true);
+
+        } catch (error) {
+            console.error('Error validating email:', error);
+            toast.error('Error validating email. Please try again.');
+            setEmailValidationError('System error during validation.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const saveResumeDataToSupabase = async (analysisData: ResumeAnalysisData) => {
         try {
             console.log('Raw analysis data received:', analysisData);
 
-            // Validate input data
             if (!analysisData || typeof analysisData !== 'object') {
                 console.error('Invalid analysis data received');
                 toast.error('Invalid analysis data');
                 return null;
             }
 
-            // Transform certifications - handle both string and object formats
             const safeCertifications: Certification[] = (analysisData.certifications || [])
                 .map(cert => {
-                    if (typeof cert === 'string') {
-                        return { name: cert, year: '' };
-                    }
-                    if (cert && typeof cert === 'object' && 'name' in cert) {
-                        return {
-                            name: cert.name || 'Unnamed Certification',
-                            year: cert.year || ''
-                        };
-                    }
+                    if (typeof cert === 'string') return { name: cert, year: '' };
+                    if (cert && typeof cert === 'object' && 'name' in cert) return { name: cert.name || 'Unnamed Certification', year: cert.year || '' };
                     return null;
                 })
                 .filter((cert): cert is Certification => cert !== null);
 
-            // Transform achievements - ensure they are strings
             const safeAchievements: string[] = (analysisData.achievements || [])
                 .map(achievement => {
-                    if (typeof achievement === 'string') {
-                        return achievement;
-                    }
-                    if (achievement && typeof achievement === 'object') {
-                        return JSON.stringify(achievement);
-                    }
+                    if (typeof achievement === 'string') return achievement;
+                    if (achievement && typeof achievement === 'object') return JSON.stringify(achievement);
                     return null;
                 })
                 .filter((ach): ach is string => ach !== null && ach.length > 0);
 
-            // Get experience data safely
             const experienceYears = analysisData.experience?.years ?? 0;
             const experienceLevel = analysisData.experience?.level ?? 'Fresher';
+            const experienceYearsString = experienceYears === 0 ? 'Fresher' : experienceYears.toString();
 
-            // Convert experience to string format for database
-            const experienceYearsString = experienceYears === 0
-                ? 'Fresher'
-                : experienceYears.toString();
-
-            // Transform education data
             const safeEducation: Education[] = (analysisData.education || []).map(edu => ({
                 degree: edu.degree || 'Not specified',
                 institution: edu.institution || 'Not specified',
@@ -183,27 +302,18 @@ function Interview() {
                 details: ''
             }));
 
-            // Transform projects data - CLEAN FORMAT
             const safeProjects: Project[] = (analysisData.projects || []).map((project, index) => ({
                 name: project.name || `Project ${index + 1}`,
-                description: (project.main_points || [])
-                    .filter(point => point && point.trim().length > 0)
-                    .join('. ') || 'No description available',
-                technologies: (project.technologies || [])
-                    .filter(tech => tech && tech.trim().length > 0)
+                description: (project.main_points || []).filter(point => point && point.trim().length > 0).join('. ') || 'No description available',
+                technologies: (project.technologies || []).filter(tech => tech && tech.trim().length > 0)
             }));
 
-            // Flatten skills from categorized format
-            const allSkills = Object.values(analysisData.skills || {})
-                .flat()
-                .filter((skill, index, self) => skill && self.indexOf(skill) === index); // Remove duplicates
+            const allSkills = Object.values(analysisData.skills || {}).flat().filter((skill, index, self) => skill && self.indexOf(skill) === index);
 
-            // Create professional summary
             const professionalSummary = experienceYears === 0
                 ? `Entry-level professional with ${safeProjects.length} project${safeProjects.length !== 1 ? 's' : ''} and expertise in ${allSkills.slice(0, 3).join(', ')}`
                 : `${experienceLevel} with ${experienceYears} year${experienceYears !== 1 ? 's' : ''} of experience, ${safeProjects.length} notable project${safeProjects.length !== 1 ? 's' : ''}, and proficiency in ${allSkills.slice(0, 5).join(', ')}`;
 
-            // Create key highlights
             const keyHighlights: string[] = [
                 ...safeEducation.map(edu => `${edu.degree}${edu.institution ? ` from ${edu.institution}` : ''}`),
                 ...safeProjects.slice(0, 3).map(proj => `Developed: ${proj.name}`),
@@ -212,26 +322,24 @@ function Interview() {
                 `${experienceLevel} - ${experienceYears} years experience`
             ].filter(Boolean);
 
-            // Transform the AI analysis data to match our ResumeData interface
             const resumeData: ResumeData = {
                 professionalSummary,
                 experienceYears,
                 technicalSkills: allSkills,
                 projects: safeProjects,
-                workExperience: [], // Empty as we don't extract this from current parsing
+                workExperience: [],
                 education: safeEducation,
                 certifications: safeCertifications,
                 achievements: safeAchievements,
                 languages: {
                     programming: allSkills,
-                    spoken: ['English'] // Default
+                    spoken: ['English']
                 },
                 keyHighlights
             };
 
             console.log('Transformed resume data for database:', resumeData);
 
-            // Save to Supabase
             const { data, error } = await supabase
                 .from('ResumeData')
                 .insert([
@@ -273,7 +381,7 @@ function Interview() {
         const savedResumeData = await saveResumeDataToSupabase(data);
         if (savedResumeData) {
             setResumeData(savedResumeData);
-            setStoredAnalysisData(data); // Store the analysis data for dialog reopening
+            setStoredAnalysisData(data);
             setShowResumeDialog(false);
             toast.success('Resume analyzed and saved successfully!');
         }
@@ -281,10 +389,6 @@ function Interview() {
 
     const handleDialogOpenChange = (open: boolean) => {
         setShowResumeDialog(open);
-        // If opening the dialog and we have stored analysis data, pass it to the dialog
-        if (open && storedAnalysisData) {
-            // The dialog will receive the stored data through props
-        }
     };
 
     const proceedToInterview = () => {
@@ -293,13 +397,38 @@ function Interview() {
             return;
         }
 
-        // Navigate to the room page
+        if (!isInterviewAvailable && interviewData?.schedule_date) {
+            setShowScheduleAlert(true);
+            return;
+        }
+
         router.push(`/interview/${interview_id}/room`);
+    };
+
+    const formatScheduleDateTime = (dateString: string | null, timeString: string | null) => {
+        const date = combineDateTime(dateString, timeString || "00:00");
+        if (!date) return "Immediately available";
+
+        return date.toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        });
+    };
+
+    const getValidityPeriod = (validity: number | null) => {
+        if (!validity) return "24 hours";
+        if (validity < 60) return `${validity} minutes`;
+        if (validity < 1440) return `${Math.floor(validity / 60)} hours`;
+        return `${Math.floor(validity / 1440)} days`;
     };
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-cyan-50/40 relative overflow-hidden">
-            {/* Animated Background Elements */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-to-br from-blue-200/20 to-cyan-200/20 rounded-full blur-3xl animate-pulse"></div>
                 <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gradient-to-tr from-cyan-200/20 to-blue-200/20 rounded-full blur-3xl animate-pulse delay-1000"></div>
@@ -308,7 +437,6 @@ function Interview() {
 
             <div className="relative z-10 px-6 py-8">
                 <div className="max-w-7xl mx-auto">
-                    {/* Header Section */}
                     <div className="flex flex-col items-center mb-12">
                         <div className="flex items-center gap-4 mb-6 p-4 bg-white/60 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/40">
                             <div className="relative">
@@ -330,9 +458,38 @@ function Interview() {
                         </div>
                     </div>
 
-                    {/* Main Hero Card */}
-                    <div className="bg-white/40 backdrop-blur-2xl rounded-2xl shadow-xl border border-white/30 overflow-hidden mb-6 w-full mx-auto">
-                        {/* Large Video Hero Section */}
+                    {!isInterviewAvailable && interviewData?.schedule_date && (
+                        <div className="mb-6 animate-pulse">
+                            <div className="bg-gradient-to-r from-yellow-50 via-amber-50 to-orange-50 border-2 border-yellow-200 rounded-2xl shadow-lg p-6">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 rounded-full bg-gradient-to-r from-yellow-400 to-orange-500 flex items-center justify-center">
+                                        <Lock className="w-6 h-6 text-white" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="text-lg font-bold text-yellow-800 mb-1">
+                                            Interview Scheduled
+                                        </h3>
+                                        <p className="text-yellow-700 mb-2">
+                                            This interview is scheduled to start at{' '}
+                                            <span className="font-semibold">
+                                                {formatScheduleDateTime(interviewData.schedule_date, interviewData.schedule_time)}
+                                            </span>
+                                        </p>
+                                        <div className="flex items-center gap-3">
+                                            <div className="px-4 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg font-bold animate-pulse">
+                                                {timeUntilAvailable}
+                                            </div>
+                                            <div className="text-sm text-yellow-600">
+                                                Will be valid for {getValidityPeriod(interviewData.validity)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className={`bg-white/40 backdrop-blur-2xl rounded-2xl shadow-xl border border-white/30 overflow-hidden mb-6 w-full mx-auto ${!isInterviewAvailable ? 'opacity-80' : ''}`}>
                         <div className="relative bg-gradient-to-br from-blue-400/80 via-blue-500/80 to-cyan-500/80 p-4 md:p-6">
                             <div className="flex flex-col items-center space-y-4 text-white">
                                 <div className="flex flex-col items-center space-y-2">
@@ -347,11 +504,9 @@ function Interview() {
                             </div>
                         </div>
 
-                        {/* Content Section - Side by Side Layout */}
                         <div className="p-4 md:p-6">
                             {!resumeData ? (
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                    {/* Left Column - Video */}
                                     <div className="space-y-6">
                                         <div className="relative group">
                                             <div className="w-full h-64 md:h-80 rounded-2xl overflow-hidden shadow-2xl bg-black/30 border-4 border-white/20">
@@ -360,6 +515,7 @@ function Interview() {
                                                     autoPlay
                                                     loop
                                                     muted
+                                                    playsInline
                                                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                                                 />
                                             </div>
@@ -369,7 +525,6 @@ function Interview() {
                                             </div>
                                         </div>
 
-                                        {/* Stats Footer */}
                                         <div className="flex items-center justify-around text-center">
                                             <div className="flex flex-col items-center space-y-1">
                                                 <span className="text-lg font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">10K+</span>
@@ -388,9 +543,7 @@ function Interview() {
                                         </div>
                                     </div>
 
-                                    {/* Right Column - Form */}
                                     <div className="space-y-6">
-                                        {/* User Details Input Section */}
                                         <div className="flex flex-col space-y-4">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold text-sm shadow-md">
@@ -415,13 +568,17 @@ function Interview() {
                                                         placeholder="Email Address"
                                                         value={email}
                                                         onChange={(e) => setEmail(e.target.value)}
-                                                        className="pl-10 text-base p-3 border-2 border-gray-200 focus:border-blue-400 rounded-lg transition-all duration-300 bg-white/80 backdrop-blur-sm shadow-md focus:shadow-lg"
+                                                        className={`pl-10 text-base p-3 border-2 ${email && !validateEmail(email) ? 'border-red-300 focus:border-red-400' : emailValidationError ? 'border-red-300 focus:border-red-400' : 'border-gray-200 focus:border-blue-400'} rounded-lg transition-all duration-300 bg-white/80 backdrop-blur-sm shadow-md focus:shadow-lg`}
                                                     />
+                                                    {emailValidationError && (
+                                                        <p className="text-red-500 text-xs mt-1 ml-1 flex items-center gap-1">
+                                                            <AlertCircle className="w-3 h-3" /> {emailValidationError}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
 
-                                        {/* Prerequisites Section */}
                                         <div className="flex flex-col space-y-4">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold text-sm shadow-md">
@@ -463,29 +620,35 @@ function Interview() {
                                             </div>
                                         </div>
 
-                                        {/* Join Button Section */}
                                         <div className="flex flex-col items-center space-y-3 pt-4">
                                             <Button
                                                 onClick={handleContinue}
                                                 disabled={loading || !userName || !email}
                                                 className={`
                                                     group relative overflow-hidden px-8 py-3 text-base font-semibold rounded-xl
-                                                    bg-gradient-to-r from-blue-500 via-blue-600 to-cyan-500 
-                                                    hover:from-blue-600 hover:via-blue-700 hover:to-cyan-600
+                                                    ${isInterviewAvailable
+                                                        ? 'bg-gradient-to-r from-blue-500 via-blue-600 to-cyan-500 hover:from-blue-600 hover:via-blue-700 hover:to-cyan-600'
+                                                        : 'bg-gradient-to-r from-gray-400 to-gray-500 hover:from-gray-500 hover:to-gray-600 cursor-not-allowed'
+                                                    }
                                                     shadow-lg hover:shadow-cyan-500/25 transform hover:-translate-y-1 
                                                     transition-all duration-300 border border-white/20
                                                     disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none
-                                                    min-w-[200px] cursor-pointer
+                                                    min-w-[200px]
                                                 `}
                                             >
                                                 <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
                                                 <div className="relative flex items-center justify-center gap-2">
                                                     <MonitorUp className="w-4 h-4" />
-                                                    {loading ? "Preparing..." : "Upload Resume"}
+                                                    {loading ? <Loader2 className="animate-spin w-4 h-4" /> : (
+                                                        isInterviewAvailable ? "Upload Resume" : "Interview Scheduled"
+                                                    )}
                                                 </div>
                                             </Button>
                                             <p className="text-xs text-gray-500 max-w-xs text-center">
-                                                Next step: Upload your resume for professional analysis
+                                                {isInterviewAvailable
+                                                    ? "Next step: Upload your resume for professional analysis"
+                                                    : `Interview will be available ${timeUntilAvailable}`
+                                                }
                                             </p>
                                         </div>
                                     </div>
@@ -500,7 +663,7 @@ function Interview() {
                                         <h3 className="text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">Resume Analysis Complete</h3>
                                     </div>
 
-                                    {/* Professional Overview - FIXED: Better responsive grid */}
+                                    {/* Professional Overview */}
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                         <div className="p-3 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg text-center border border-blue-200 min-w-0">
                                             <Briefcase className="w-5 h-5 text-blue-600 mx-auto mb-1" />
@@ -528,7 +691,7 @@ function Interview() {
                                         </div>
                                     </div>
 
-                                    {/* Key Highlights Preview */}
+                                    {/* Key Highlights */}
                                     {(resumeData.keyHighlights || []).length > 0 && (
                                         <div className="p-4 bg-gradient-to-r from-cyan-50 to-blue-50 rounded-lg border border-cyan-200">
                                             <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
@@ -546,7 +709,7 @@ function Interview() {
                                         </div>
                                     )}
 
-                                    {/* Top Skills Preview */}
+                                    {/* Skills */}
                                     {(resumeData.technicalSkills || []).length > 0 && (
                                         <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
                                             <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
@@ -568,7 +731,7 @@ function Interview() {
                                         </div>
                                     )}
 
-                                    {/* Certifications Preview */}
+                                    {/* Certifications */}
                                     {(resumeData.certifications || []).length > 0 && (
                                         <div className="p-4 bg-gradient-to-r from-yellow-50 to-amber-50 rounded-lg border border-yellow-200">
                                             <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
@@ -580,24 +743,6 @@ function Interview() {
                                                     <div key={index} className="bg-white/60 border border-yellow-200 rounded-lg p-3">
                                                         <h5 className="font-medium text-gray-900 text-sm">{cert.name}</h5>
                                                         {cert.year && <p className="text-xs text-yellow-600 mt-1">{cert.year}</p>}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Achievements Preview */}
-                                    {(resumeData.achievements || []).length > 0 && (
-                                        <div className="p-4 bg-gradient-to-r from-red-50 to-pink-50 rounded-lg border border-red-200">
-                                            <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                                                <Star className="w-4 h-4 text-red-600" />
-                                                Achievements ({(resumeData.achievements || []).length})
-                                            </h4>
-                                            <div className="space-y-2">
-                                                {(resumeData.achievements || []).map((achievement, index) => (
-                                                    <div key={index} className="flex items-start gap-2">
-                                                        <div className="w-1.5 h-1.5 rounded-full bg-red-600 mt-2 flex-shrink-0"></div>
-                                                        <p className="text-sm text-gray-700">{achievement}</p>
                                                     </div>
                                                 ))}
                                             </div>
@@ -616,34 +761,88 @@ function Interview() {
                                         </Button>
                                         <Button
                                             onClick={proceedToInterview}
-                                            className="flex-1 bg-gradient-to-r from-green-500 via-green-600 to-emerald-500 hover:from-green-600 hover:via-green-700 hover:to-emerald-600 shadow-lg hover:shadow-green-500/25 transform hover:-translate-y-1 transition-all duration-300 cursor-pointer"
+                                            className={`flex-1 ${isInterviewAvailable
+                                                ? 'bg-gradient-to-r from-green-500 via-green-600 to-emerald-500 hover:from-green-600 hover:via-green-700 hover:to-emerald-600 cursor-pointer'
+                                                : 'bg-gradient-to-r from-gray-400 to-gray-500 cursor-not-allowed'
+                                                } shadow-lg hover:shadow-green-500/25 transform hover:-translate-y-1 transition-all duration-300`}
+                                            disabled={!isInterviewAvailable}
                                         >
                                             <Video className="w-4 h-4 mr-2" />
-                                            Start Tailored Interview
+                                            {isInterviewAvailable ? 'Start Tailored Interview' : 'Interview Scheduled'}
                                         </Button>
                                     </div>
                                 </div>
                             )}
                         </div>
                     </div>
-
-                    {/* ResumeUploadDialog */}
-                    {showResumeDialog && (
-                        <ResumeUploadDialog
-                            open={showResumeDialog}
-                            onOpenChange={handleDialogOpenChange}
-                            onUploadSuccess={handleResumeUpload}
-                            existingAnalysisData={storedAnalysisData}
-                            interview_id={interview_id as string}
-                            userName={userName}
-                            userEmail={email}
-                        />
-                    )}
                 </div>
-
             </div>
+
+            {/* Resume Upload Modal */}
+            {showResumeDialog && (
+                <ResumeUploadDialog
+                    open={showResumeDialog}
+                    onOpenChange={setShowResumeDialog}
+                    interview_id={interview_id as string}
+                    userName={userName}
+                    userEmail={email}
+                    onUploadSuccess={handleResumeUpload}
+                    existingAnalysisData={storedAnalysisData}
+                />
+            )}
+
+            {/* Schedule Alert Dialog */}
+            <AlertDialog open={showScheduleAlert} onOpenChange={setShowScheduleAlert}>
+                <AlertDialogContent className="border-2 border-yellow-200 rounded-2xl max-w-lg bg-white shadow-2xl shadow-yellow-500/20">
+                    <AlertDialogHeader className="text-center space-y-4">
+                        <div className="mx-auto w-16 h-16 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full flex items-center justify-center shadow-lg">
+                            <Calendar className="w-8 h-8 text-white" />
+                        </div>
+                        <AlertDialogTitle className="text-2xl font-bold bg-gradient-to-r from-yellow-600 to-orange-700 bg-clip-text text-transparent">
+                            Interview Scheduled
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="text-slate-600 text-base leading-relaxed space-y-4">
+                            <div className="p-4 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-xl border border-yellow-200/50">
+                                <p className="font-semibold text-yellow-800 mb-2">This interview is scheduled for:</p>
+                                <div className="space-y-2 text-sm text-left">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                                        <span><strong>Start Time:</strong> {formatScheduleDateTime(interviewData?.schedule_date || null, interviewData?.schedule_time || null)}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                                        <span><strong>Validity:</strong> {getValidityPeriod(interviewData?.validity || null)} after start</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                        <span><strong>Status:</strong> {timeUntilAvailable}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-base">
+                                Please wait until the scheduled time to upload your resume and start the interview.
+                                The interview link will be active for the specified validity period.
+                            </p>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter className="flex gap-3 pt-6">
+                        <AlertDialogCancel className="flex-1 py-3 border-2 border-slate-300 hover:border-slate-400 text-slate-600 hover:text-slate-700 bg-white hover:bg-slate-50 rounded-xl font-medium transition-all duration-300 cursor-pointer">
+                            Close
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={() => setShowScheduleAlert(false)}
+                            className="flex-1 py-3 bg-gradient-to-r from-yellow-500 via-orange-600 to-yellow-500 hover:from-yellow-600 hover:via-orange-700 hover:to-yellow-600 text-white rounded-xl font-bold shadow-lg shadow-yellow-500/25 hover:shadow-xl hover:shadow-yellow-500/35 transition-all duration-300 border-0 cursor-pointer"
+                        >
+                            <div className="flex items-center gap-2">
+                                <span>Got It</span>
+                                <Clock className="w-4 h-4" />
+                            </div>
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     )
 }
 
-export default Interview;
+export default Interview

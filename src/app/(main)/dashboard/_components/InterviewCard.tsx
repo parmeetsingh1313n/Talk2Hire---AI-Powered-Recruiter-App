@@ -1,26 +1,31 @@
 "use client";
+
 import {
     Card,
     CardContent,
     CardFooter,
     CardHeader,
-} from "@/components/ui/card"
-import { useState, useRef, useEffect } from "react";
+} from "@/components/ui/card";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
     Tooltip,
     TooltipContent,
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Copy, Check, Clock, List, Boxes, Calendar, ExternalLink, AlertCircle } from "lucide-react";
+import {
+    Copy, Check, Clock, List, ExternalLink,
+    AlertCircle, Lock, Timer, Video, Mic, MoreHorizontal,
+    CalendarClock, Smartphone, Boxes
+} from "lucide-react";
 import { toast } from "sonner";
 import { EmailDialog } from "./EmailDialog";
+import { useUser } from "@/app/provider";
 
-
+// --- Types based on your Schema ---
 interface Interview {
-    id: string;
+    id: string | number;
     interview_id: string;
     jobPosition: string;
     jobDescription?: string;
@@ -29,305 +34,335 @@ interface Interview {
     questionList?: any[];
     created_at: string;
     userEmail: string;
+    schedule_date?: string | null;
+    schedule_time?: string | null;
+    validity?: number | null;
+    service_type?: string;
 }
 
 interface InterviewCardProps {
-    interview?: Interview | null; // Make interview optional and nullable
+    interview?: Interview | null;
 }
 
-// Hook to detect if text is truncated
-function useIsTruncated() {
-    const [isTruncated, setIsTruncated] = useState(false);
-    const ref = useRef<HTMLParagraphElement>(null);
+// --- Helper Functions ---
+const combineDateTime = (dateStr: string | null, timeStr: string | null): Date | null => {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    if (timeStr) {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        date.setHours(hours, minutes, 0, 0);
+    } else {
+        date.setHours(0, 0, 0, 0);
+    }
+    return date;
+};
 
-    useEffect(() => {
-        const checkTruncation = () => {
-            if (ref.current) {
-                const isTextTruncated = ref.current.scrollHeight > ref.current.clientHeight;
-                setIsTruncated(isTextTruncated);
-            }
-        };
+// Simple utility to join class names if you don't have clsx/tailwind-merge
+const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(' ');
 
-        checkTruncation();
-        window.addEventListener('resize', checkTruncation);
-
-        return () => window.removeEventListener('resize', checkTruncation);
-    }, []);
-
-    return { ref, isTruncated };
-}
-
-export function InterviewCard({ interview }: InterviewCardProps) {
+export default function InterviewCard({ interview }: InterviewCardProps) {
     const [copied, setCopied] = useState(false);
-    const { ref: jobDescRef, isTruncated: isJobDescTruncated } = useIsTruncated();
+    const [interviewStatus, setInterviewStatus] = useState<'scheduled' | 'active' | 'expired' | 'available'>('available');
+    const [timeRemaining, setTimeRemaining] = useState<string>('');
 
-    // Safe function to get interview field with fallbacks
-    const getInterviewField = {
-        id: interview?.id || 'unknown',
-        interview_id: interview?.interview_id || 'unknown',
-        jobPosition: interview?.jobPosition || 'Unknown Position',
-        jobDescription: interview?.jobDescription,
-        duration: interview?.duration || 'Not specified',
-        type: interview?.type || null,
-        questionList: interview?.questionList || [],
-        created_at: interview?.created_at || new Date().toISOString(),
-        userEmail: interview?.userEmail || 'unknown'
+    const { user } = useUser() as {
+        user: { name?: string, email?: string, picture?: string }
     };
 
-    // Function to format interview type (handle both string, array, and null)
-    const formatInterviewType = (type: string | string[] | null): string => {
-        if (!type) return 'General';
-        if (Array.isArray(type)) {
-            return type.join(" • ");
+    // --- Status Check Logic ---
+    useEffect(() => {
+        if (interview?.schedule_date) {
+            checkInterviewStatus();
+            const interval = setInterval(checkInterviewStatus, 60000);
+            return () => clearInterval(interval);
         }
-        return type;
-    };
+    }, [interview]);
 
-    // Function to get first type for badge (handle both string, array, and null)
-    const getPrimaryType = (type: string | string[] | null): string => {
-        if (!type) return 'General';
-        if (Array.isArray(type)) {
-            return type[0] || 'General';
+    const checkInterviewStatus = () => {
+        if (!interview?.schedule_date) {
+            setInterviewStatus('available');
+            return;
         }
-        return type;
+
+        const now = new Date();
+        const scheduleDateTime = combineDateTime(interview.schedule_date, interview.schedule_time || "00:00");
+        if (!scheduleDateTime) {
+            setInterviewStatus('available');
+            return;
+        }
+
+        const validityMinutes = interview.validity || 1440;
+        const endTime = new Date(scheduleDateTime.getTime() + (validityMinutes * 60000));
+
+        if (now < scheduleDateTime) {
+            setInterviewStatus('scheduled');
+            updateTimeRemaining(scheduleDateTime, now, true);
+        } else if (now > endTime) {
+            setInterviewStatus('expired');
+        } else {
+            setInterviewStatus('active');
+            updateTimeRemaining(endTime, now, false);
+        }
     };
 
+    const updateTimeRemaining = (targetDate: Date, currentTime: Date, untilStart: boolean) => {
+        const diff = targetDate.getTime() - currentTime.getTime();
+        if (diff <= 0) {
+            setTimeRemaining(untilStart ? 'Starting soon' : 'Ending soon');
+            return;
+        }
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+        let timeString = "";
+        if (days > 0) timeString += `${days}d `;
+        if (hours > 0) timeString += `${hours}h `;
+        if (minutes > 0) timeString += `${minutes}m`;
+        setTimeRemaining(`${untilStart ? 'Starts in' : 'Ends in'} ${timeString.trim()}`);
+    };
+
+    // --- Data Destructuring & Safety ---
+    if (!interview) return null;
+
+    const {
+        interview_id, jobPosition, duration,
+        type, questionList, schedule_date,
+        schedule_time, service_type
+    } = interview;
+
+    const qCount = Array.isArray(questionList) ? questionList.length : 0;
+    const interviewTypeText = Array.isArray(type) ? type.join(" • ") : (type || 'General');
+    const isInterviewTypeLong = interviewTypeText.length > 15;
+
+    // --- UI Formatting Helpers ---
+
+    // 1. Service Type Logic (Audio vs Video)
+    const getServiceTypeConfig = () => {
+        const sType = (service_type || '').toLowerCase();
+        if (sType.includes('audio') || sType.includes('voice')) {
+            return { icon: Mic, label: 'Audio', color: 'text-orange-600 bg-orange-100 border-orange-200' };
+        }
+        if (sType.includes('mobile')) {
+            return { icon: Smartphone, label: 'App', color: 'text-blue-600 bg-blue-100 border-blue-200' };
+        }
+        return { icon: Video, label: 'Video', color: 'text-purple-600 bg-purple-100 border-purple-200' };
+    };
+
+    const serviceConfig = getServiceTypeConfig();
+
+    // 2. Schedule Formatting
+    const formatSchedule = () => {
+        if (!schedule_date) return "Open Schedule";
+        const date = combineDateTime(schedule_date, schedule_time || "00:00");
+        if (!date) return "Invalid Date";
+        return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    };
+
+    // 3. Link Logic
     const getInterviewURL = () => {
-        if (typeof window !== 'undefined' && getInterviewField.interview_id !== 'unknown') {
+        if (typeof window !== 'undefined' && interview_id) {
             const baseUrl = process.env.NEXT_PUBLIC_HOST_URL || window.location.origin;
-            return `${baseUrl}/interview/${getInterviewField.interview_id}`;
+            return `${baseUrl}/interview/${interview_id}`;
         }
         return '';
     };
 
     const onCopyLink = async () => {
-        try {
-            const link = getInterviewURL();
-            if (!link) {
-                toast.error("Interview link not available");
-                return;
-            }
-
-            await navigator.clipboard.writeText(link);
-            setCopied(true);
-            toast.success("Link Copied to Clipboard!", {
-                className: "bg-gradient-to-r from-green-500 to-emerald-600 text-white border-none"
-            });
-            setTimeout(() => setCopied(false), 3000);
-        } catch (error) {
-            console.error('Failed to copy link:', error);
-            toast.error("Failed to copy link");
-        }
+        const link = getInterviewURL();
+        if (!link) return;
+        await navigator.clipboard.writeText(link);
+        setCopied(true);
+        toast.success("Link Copied!");
+        setTimeout(() => setCopied(false), 2000);
     };
 
-    const formatDate = (dateString: string) => {
-        try {
-            const date = new Date(dateString);
-            return new Intl.DateTimeFormat('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric'
-            }).format(date);
-        } catch {
-            return 'Invalid date';
-        }
-    };
-
-    const getTypeBadgeVariant = (type: string) => {
-        const typeLower = type.toLowerCase();
-        if (typeLower.includes('technical')) return 'destructive';
-        if (typeLower.includes('behavioral')) return 'default';
-        if (typeLower.includes('cultural')) return 'secondary';
-        return 'outline';
-    };
-
-    const getDurationColor = (duration: string) => {
-        const durLower = duration.toLowerCase();
-        if (durLower.includes('30') || durLower.includes('half')) return 'text-orange-600';
-        if (durLower.includes('45') || durLower.includes('45')) return 'text-purple-600';
-        if (durLower.includes('60') || durLower.includes('hour')) return 'text-red-600';
-        return 'text-green-600';
-    };
-
-    // Safe interview type text with null handling
-    const interviewTypeText = formatInterviewType(getInterviewField.type);
-
-    // Check if interview type is long enough to need truncation (safe with null handling)
-    const isInterviewTypeLong = interviewTypeText.length > 15;
-
-    // If interview is completely undefined or null, show error card
-    if (!interview) {
-        return (
-            <Card className="relative overflow-hidden bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-200 rounded-2xl">
-                <CardContent className="p-6 text-center">
-                    <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
-                    <h3 className="text-lg font-semibold text-red-800 mb-2">Interview Data Missing</h3>
-                    <p className="text-red-600 text-sm">
-                        This interview data is unavailable or corrupted.
-                    </p>
-                </CardContent>
-            </Card>
-        );
-    }
-
+    // --- Render ---
     return (
         <TooltipProvider>
-            <Card className="group relative overflow-hidden bg-gradient-to-br from-white via-cyan-50/20 to-blue-50/20 border-2 border-cyan-200/40 hover:border-cyan-300/60 rounded-2xl shadow-lg hover:shadow-xl shadow-cyan-500/10 hover:shadow-cyan-500/20 transition-all duration-500 hover:scale-[1.02] cursor-pointer flex flex-col h-full">
-                {/* Animated Background Elements */}
-                <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                    <div className="absolute -top-4 -right-4 w-8 h-8 bg-gradient-to-br from-cyan-400/10 to-blue-500/10 rounded-full animate-pulse"></div>
-                    <div className="absolute -bottom-4 -left-4 w-6 h-6 bg-gradient-to-br from-sky-400/10 to-cyan-500/10 rounded-full animate-pulse delay-1000"></div>
-                </div>
+            <Card className={cn(
+                "group relative w-full h-[220px] flex flex-col justify-between transition-all duration-300",
+                "border border-slate-200 bg-white hover:border-slate-300 hover:shadow-md hover:-translate-y-1"
+            )}>
 
-                <CardHeader className="pb-3 flex-shrink-0">
-                    <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-bold text-slate-800 truncate group-hover:text-cyan-700 transition-colors duration-300">
-                                {getInterviewField.jobPosition}
-                            </h3>
-                            <p className="text-sm text-slate-500 mt-1 flex items-center gap-1">
-                                <Calendar className="w-3 h-3" />
-                                {formatDate(getInterviewField.created_at)}
-                            </p>
+                {/* STATUS STRIP (Left Border) */}
+                <div className={cn(
+                    "absolute left-0 top-0 bottom-0 w-1 rounded-l-lg transition-colors",
+                    interviewStatus === 'scheduled' ? "bg-amber-400" :
+                        interviewStatus === 'active' ? "bg-emerald-500" :
+                            interviewStatus === 'expired' ? "bg-slate-300" : "bg-blue-400"
+                )} />
+
+                <CardHeader className="pt-5 pb-2 px-5">
+                    <div className="flex justify-between items-start">
+                        {/* Title & Service Type */}
+                        <div className="space-y-1.5 max-w-[75%]">
+                            <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-slate-800 text-lg truncate leading-tight" title={jobPosition}>
+                                    {jobPosition}
+                                </h3>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                {/* Service Type Badge */}
+                                <div className={cn("flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider", serviceConfig.color)}>
+                                    <serviceConfig.icon className="w-3 h-3" />
+                                    <span>{serviceConfig.label}</span>
+                                </div>
+
+                                {/* Status Text (Tiny) */}
+                                <span className={cn(
+                                    "text-[11px] font-medium px-2 py-0.5 rounded-full",
+                                    interviewStatus === 'active' ? "text-emerald-600 bg-emerald-50 animate-pulse" :
+                                        interviewStatus === 'scheduled' ? "text-amber-600 bg-amber-50" :
+                                            interviewStatus === 'expired' ? "text-slate-500 bg-slate-100" : "text-blue-600 bg-blue-50"
+                                )}>
+                                    {interviewStatus === 'active' ? 'Live Now' :
+                                        interviewStatus === 'scheduled' ? timeRemaining.replace('Starts in', 'In') :
+                                            interviewStatus.charAt(0).toUpperCase() + interviewStatus.slice(1)}
+                                </span>
+                            </div>
                         </div>
-                        <Badge
-                            variant={getTypeBadgeVariant(getPrimaryType(getInterviewField.type))}
-                            className="ml-2 flex-shrink-0 bg-gradient-to-r from-cyan-500 to-blue-600 text-white border-0"
-                        >
-                            {getPrimaryType(getInterviewField.type)}
-                        </Badge>
                     </div>
+                </CardHeader>
 
-                    {getInterviewField.jobDescription && (
-                        <>
-                            {isJobDescTruncated ? (
+                <CardContent className="px-5 py-2">
+                    {/* Compact Info Grid */}
+                    <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm">
+
+                        {/* Date/Time */}
+                        <div className="flex items-center gap-2 text-slate-600">
+                            <CalendarClock className="w-4 h-4 text-slate-400 shrink-0" />
+                            <span className="truncate font-medium">{formatSchedule()}</span>
+                        </div>
+
+                        {/* Duration */}
+                        <div className="flex items-center gap-2 text-slate-600">
+                            <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                            <span className="truncate">{duration}</span>
+                        </div>
+
+                        {/* Questions */}
+                        <div className="flex items-center gap-2 text-slate-600">
+                            <List className="w-4 h-4 text-slate-400 shrink-0" />
+                            <span className="truncate">{qCount} Questions</span>
+                        </div>
+
+                        {/* Interview Type (Tech/Behavioral) - WITH TOOLTIP */}
+                        <div className="w-full">
+                            {isInterviewTypeLong ? (
                                 <Tooltip>
                                     <TooltipTrigger asChild>
-                                        <p
-                                            ref={jobDescRef}
-                                            className="text-sm text-slate-600 line-clamp-2 mt-2 cursor-help hover:text-slate-700 transition-colors"
-                                        >
-                                            {getInterviewField.jobDescription}
-                                        </p>
+                                        <div className="flex items-center gap-2 text-slate-600 cursor-help">
+                                            <div className="w-4 h-4 flex items-center justify-center shrink-0">
+                                                <Boxes className="w-4 h-4 text-slate-400" />
+                                            </div>
+                                            <span className="truncate capitalize">{interviewTypeText}</span>
+                                        </div>
                                     </TooltipTrigger>
-                                    <TooltipContent
-                                        side="top"
-                                        align="start"
-                                        className="max-w-sm bg-slate-800 text-white border-slate-600"
-                                    >
-                                        <p className="text-sm leading-relaxed">{getInterviewField.jobDescription}</p>
+                                    <TooltipContent className="bg-slate-800 text-white border-slate-600">
+                                        <p>{interviewTypeText}</p>
                                     </TooltipContent>
                                 </Tooltip>
                             ) : (
-                                <p
-                                    ref={jobDescRef}
-                                    className="text-sm text-slate-600 line-clamp-2 mt-2"
-                                >
-                                    {getInterviewField.jobDescription}
-                                </p>
-                            )}
-                        </>
-                    )}
-                </CardHeader>
-
-                <CardContent className="pb-4 flex-shrink-0">
-                    <div className="flex flex-wrap gap-3">
-                        {/* Duration */}
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-50 to-blue-50 rounded-xl border border-cyan-200/40">
-                            <Clock className={`w-4 h-4 ${getDurationColor(getInterviewField.duration)}`} />
-                            <span className={`text-sm font-semibold ${getDurationColor(getInterviewField.duration)}`}>
-                                {getInterviewField.duration}
-                            </span>
-                        </div>
-
-                        {/* Questions Count */}
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-50 to-sky-50 rounded-xl border border-blue-200/40">
-                            <List className="w-4 h-4 text-blue-600" />
-                            <span className="text-sm font-semibold text-blue-700">
-                                {getInterviewField.questionList.length} Qs
-                            </span>
-                        </div>
-
-                        {/* Interview Type with Conditional Tooltip */}
-                        {isInterviewTypeLong ? (
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-sky-50 to-cyan-50 rounded-xl border border-sky-200/40 cursor-help">
-                                        <Boxes className="w-4 h-4 text-sky-600" />
-                                        <span className="text-sm font-semibold text-sky-700 max-w-[120px] truncate">
-                                            {interviewTypeText}
-                                        </span>
+                                <div className="flex items-center gap-2 text-slate-600">
+                                    <div className="w-4 h-4 flex items-center justify-center shrink-0">
+                                        <Boxes className="w-4 h-4 text-slate-400" />
                                     </div>
-                                </TooltipTrigger>
-                                <TooltipContent
-                                    side="top"
-                                    className="bg-slate-800 text-white border-slate-600"
-                                >
-                                    <p className="text-sm font-medium">{interviewTypeText}</p>
-                                </TooltipContent>
-                            </Tooltip>
-                        ) : (
-                            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-sky-50 to-cyan-50 rounded-xl border border-sky-200/40">
-                                <Boxes className="w-4 h-4 text-sky-600" />
-                                <span className="text-sm font-semibold text-sky-700">
-                                    {interviewTypeText}
-                                </span>
-                            </div>
-                        )}
+                                    <span className="truncate capitalize">{interviewTypeText}</span>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </CardContent>
 
-                <CardFooter className="pt-0 mt-auto flex-shrink-0">
-                    <div className="flex gap-2 w-full">
-                        {/* Copy Link Button */}
-                        <Button
-                            onClick={onCopyLink}
-                            className={`flex-1 transition-all duration-500 transform hover:scale-105 rounded-xl font-semibold shadow-lg cursor-pointer ${copied
-                                ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-green-500/25'
-                                : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 shadow-cyan-500/25'
-                                }`}
-                        >
-                            {copied ? (
-                                <>
-                                    <Check className="w-4 h-4 mr-2 animate-pulse" />
-                                    Copied!
-                                </>
-                            ) : (
-                                <>
-                                    <Copy className="w-4 h-4 mr-2" />
-                                    Copy Link
-                                </>
-                            )}
-                        </Button>
+                <CardFooter className="px-5 pb-4 pt-2 border-t border-slate-50 bg-slate-50/50 mt-auto">
+                    <div className="flex w-full items-center justify-between gap-2">
 
-                        {/* Email Button */}
-                        <EmailDialog
-                            interviewId={getInterviewField.interview_id}
-                            jobPosition={getInterviewField.jobPosition}
-                            interviewData={{
-                                duration: getInterviewField.duration,
-                                type: interviewTypeText,
-                                questionList: getInterviewField.questionList
-                            }}
-                        />
+                        {/* Email Action - DISABLED IF EXPIRED */}
+                        {interviewStatus === 'expired' ? (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <div className="opacity-50 pointer-events-none grayscale">
+                                        <EmailDialog
+                                            interviewId={interview_id}
+                                            jobPosition={jobPosition}
+                                            interviewData={{
+                                                duration,
+                                                type: Array.isArray(type) ? type.join(', ') : (type || 'General'),
+                                                questionList
+                                            }}
+                                            adminEmail={user?.email || ''}
+                                            onEmailsAdded={() => { }}
+                                        />
+                                    </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>Interview has expired</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        ) : (
+                            <EmailDialog
+                                interviewId={interview_id}
+                                jobPosition={jobPosition}
+                                interviewData={{
+                                    duration,
+                                    type: Array.isArray(type) ? type.join(', ') : (type || 'General'),
+                                    questionList
+                                }}
+                                adminEmail={user?.email || ''}
+                                onEmailsAdded={() => { }}
+                            />
+                        )}
 
-                        {/* View Interview Button */}
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => window.open(getInterviewURL(), '_blank')}
-                            className="border-2 border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-800 rounded-xl px-3 transition-all duration-300 hover:scale-105 cursor-pointer"
-                        >
-                            <ExternalLink className="w-4 h-4" />
-                        </Button>
+                        <div className="flex gap-2">
+                            {/* Copy Link */}
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className={cn(
+                                            "h-9 w-9 rounded-lg border-slate-200 transition-all",
+                                            copied ? "border-green-500 text-green-600 bg-green-50" : "hover:border-slate-300 hover:bg-white cursor-pointer"
+                                        )}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onCopyLink();
+                                        }}
+                                        disabled={interviewStatus === 'expired'}
+                                    >
+                                        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>{interviewStatus === 'expired' ? 'Link Expired' : 'Copy Link'}</p>
+                                </TooltipContent>
+                            </Tooltip>
+
+                            {/* Preview */}
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        size="icon"
+                                        className="h-9 w-9 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 shadow-cyan-500/25 text-white shadow-sm cursor-pointer"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.open(getInterviewURL(), '_blank');
+                                        }}
+                                        disabled={interviewStatus === 'expired'}
+                                    >
+                                        <ExternalLink className="h-4 w-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>{interviewStatus === 'expired' ? 'Preview Unavailable' : 'Preview Interview'}</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </div>
                     </div>
                 </CardFooter>
-
-                {/* Hover Effect Border */}
-                <div className="absolute inset-0 rounded-2xl border-2 border-transparent group-hover:border-cyan-300/30 transition-all duration-500 pointer-events-none"></div>
             </Card>
         </TooltipProvider>
     );
 }
-
-export default InterviewCard;

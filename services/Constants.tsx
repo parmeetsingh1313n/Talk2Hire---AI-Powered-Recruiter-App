@@ -12,7 +12,7 @@ export const SidebarOptions = [
         path: "/scheduled-interview"
     },
     {
-        name: "All Interview",
+        name: "Active Interview",
         icon: List,
         path: "/all-interview"
     },

@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
-      to,
+      to, // Can be string or array
       jobPosition,
       duration,
       questionCount,
@@ -14,9 +14,29 @@ export async function POST(request: Request) {
       customMessage,
     } = body;
 
-    if (!to) {
+    // Handle both single email and array of emails
+    const recipients = Array.isArray(to) ? to : [to];
+
+    if (!recipients || recipients.length === 0) {
       return NextResponse.json(
-        { success: false, error: "Recipient email is required" },
+        { success: false, error: "At least one recipient email is required" },
+        { status: 400 }
+      );
+    }
+
+    // Validate all emails
+    const invalidEmails = recipients.filter(email => {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return !emailRegex.test(email);
+    });
+
+    if (invalidEmails.length > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid email addresses",
+          invalidEmails
+        },
         { status: 400 }
       );
     }
@@ -30,11 +50,15 @@ export async function POST(request: Request) {
       },
     });
 
-    const subject = `🎯 Interview Invitation - ${
-      jobPosition || "Position"
-    } | Talk2Hire AI Recruiter`;
+    const results = [];
 
-    const htmlContent = `
+    // Send to each recipient
+    for (const recipient of recipients) {
+      try {
+        const subject = `🎯 Interview Invitation - ${jobPosition || "Position"
+          } | Talk2Hire AI Recruiter`;
+
+        const htmlContent = `
 <!DOCTYPE html>
 <html
   xmlns:v="urn:schemas-microsoft-com:vml"
@@ -2444,10 +2468,9 @@ export async function POST(request: Request) {
                                                                                                                     font-size: 16px;
                                                                                                                     line-height: 24px;
                                                                                                                   "
-                                                                                                                  >${
-                                                                                                                    jobPosition ||
-                                                                                                                    "Position Not Specified"
-                                                                                                                  }</span
+                                                                                                                  >${jobPosition ||
+          "Position Not Specified"
+          }</span
                                                                                                                 >
                                                                                                               </div>
                                                                                                             </div>
@@ -2793,10 +2816,9 @@ export async function POST(request: Request) {
                                                                                                                     font-size: 16px;
                                                                                                                     line-height: 24px;
                                                                                                                   "
-                                                                                                                  >${
-                                                                                                                    duration ||
-                                                                                                                    "30 minutes"
-                                                                                                                  }</span
+                                                                                                                  >${duration ||
+          "30 minutes"
+          }</span
                                                                                                                 >
                                                                                                               </div>
                                                                                                             </div>
@@ -3128,10 +3150,9 @@ export async function POST(request: Request) {
                                                                                                               font-size: 16px;
                                                                                                               line-height: 24px;
                                                                                                             "
-                                                                                                            >${
-                                                                                                              interviewType ||
-                                                                                                              "General"
-                                                                                                            }</span
+                                                                                                            >${interviewType ||
+          "General"
+          }</span
                                                                                                           >
                                                                                                         </div>
                                                                                                       </div>
@@ -3474,10 +3495,9 @@ export async function POST(request: Request) {
                                                                       text-decoration: none;
                                                                       -webkit-text-size-adjust: none;
                                                                     "
-                                                                    href="${
-                                                                      interviewLink ||
-                                                                      "#"
-                                                                    }"
+                                                                    href="${interviewLink ||
+          "#"
+          }"
                                                                     target="_blank"
                                                                     ><span
                                                                       style="
@@ -4004,10 +4024,9 @@ export async function POST(request: Request) {
     line-height: 140%;
   "
 >
-  ${
-    customMessage ||
-    "Ready to ace your interview? We’re here to help you succeed"
-  }
+  ${customMessage ||
+          "Ready to ace your interview? We’re here to help you succeed"
+          }
 </span>
 </a
                                                                         ><span
@@ -4618,7 +4637,7 @@ export async function POST(request: Request) {
 
 `;
 
-    const textContent = `
+        const textContent = `
 Hello,
 
 Congratulations! You have been invited for an interview through Talk2Hire AI Recruiter.
@@ -4641,34 +4660,49 @@ Best regards,
 Talk2Hire AI Recruiter Team
         `;
 
-    // Add logo as attachment
-    const fs = require("fs");
-    const path = require("path");
+        // Add logo as attachment
+        const fs = require("fs");
+        const path = require("path");
 
-    const logoPath = path.join(process.cwd(), "public", "logo-new.png");
-    let attachments = [];
+        const logoPath = path.join(process.cwd(), "public", "logo-new.png");
+        let attachments = [];
 
-    // Check if logo exists and add as attachment
-    try {
-      if (fs.existsSync(logoPath)) {
-        attachments.push({
-          filename: "logo-new.png",
-          path: logoPath,
-          cid: "logo", // same as referenced in the email template
+        // Check if logo exists and add as attachment
+        try {
+          if (fs.existsSync(logoPath)) {
+            attachments.push({
+              filename: "logo-new.png",
+              path: logoPath,
+              cid: "logo", // same as referenced in the email template
+            });
+          }
+        } catch (error) {
+          console.warn("Logo file not found, email will be sent without logo");
+        }
+
+        await transporter.sendMail({
+          from: `"Talk2Hire AI Recruiter" <${process.env.EMAIL_USER}>`,
+          to,
+          subject,
+          text: textContent,
+          html: htmlContent,
+          attachments: attachments,
+        });
+        results.push({
+          email: recipient,
+          success: true
+        });
+      } catch (error) {
+        results.push({
+          email: recipient,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
         });
       }
-    } catch (error) {
-      console.warn("Logo file not found, email will be sent without logo");
     }
 
-    await transporter.sendMail({
-      from: `"Talk2Hire AI Recruiter" <${process.env.EMAIL_USER}>`,
-      to,
-      subject,
-      text: textContent,
-      html: htmlContent,
-      attachments: attachments,
-    });
+    const successful = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
 
     return NextResponse.json({
       success: true,
