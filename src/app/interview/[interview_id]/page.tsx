@@ -80,9 +80,10 @@ interface ResumeData {
     keyHighlights: string[];
 }
 
+// ✅ FIXED INTERFACE - Make main_points OPTIONAL
 interface ResumeAnalysisData {
     education: Array<{ degree: string; institution: string; year: string }>;
-    projects: Array<{ name: string; main_points: string[]; technologies: string[] }>;
+    projects: Array<{ name: string; main_points?: string[]; technologies?: string[] }>; // ⬅️ FIXED: main_points is optional
     experience: { years: number; level: string };
     skills: { [key: string]: string[] };
     certifications?: Array<string | { name: string; year: string }>;
@@ -377,6 +378,7 @@ function Interview() {
         }
     };
 
+    // ✅ FIXED: Keep as async function
     const handleResumeUpload = async (data: ResumeAnalysisData) => {
         const savedResumeData = await saveResumeDataToSupabase(data);
         if (savedResumeData) {
