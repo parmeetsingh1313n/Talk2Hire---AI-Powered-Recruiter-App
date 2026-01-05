@@ -1,9 +1,11 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Briefcase, Award, GraduationCap, Code, Star, Calendar, Target, TrendingUp, Users, Settings } from 'lucide-react';
+
+// ✅ CORRECT INTERFACES
 interface Project {
     name: string;
-    main_points?: string[]; 
-    technologies?: string[];
+    main_points?: string[];  // ⬅️ OPTIONAL
+    technologies?: string[]; // ⬅️ OPTIONAL
 }
 
 interface Education {
@@ -32,7 +34,7 @@ interface AnalysisSummary {
 
 interface ResumeAnalysisData {
     education: Education[];
-    projects: Project[];  
+    projects: Project[];  // ⬅️ Uses Project interface
     experience: Experience;
     skills: Skills;
     certifications?: Array<string | { name: string; year: string }>;
@@ -53,7 +55,7 @@ interface ResumeAnalysisResult {
 interface ResumeUploadDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onUploadSuccess: (data: ResumeAnalysisData) => void; 
+    onUploadSuccess: (data: ResumeAnalysisData) => void; // ⬅️ This is correct
     existingAnalysisData?: ResumeAnalysisData | null;
     interview_id?: string;
     userName?: string;
