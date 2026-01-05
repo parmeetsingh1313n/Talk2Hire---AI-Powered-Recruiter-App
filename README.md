@@ -196,5 +196,5 @@ This project is licensed under the **MIT License**.
 <div align="center">
 <strong>Built with ❤️ for the future of recruitment</strong>
 <br/><br/>
-© 2025 Talk2Hire – AI Powered Recruiter App
+© 2026 Talk2Hire – AI Powered Recruiter App
 </div>
