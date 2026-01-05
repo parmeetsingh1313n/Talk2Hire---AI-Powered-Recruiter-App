@@ -1,4 +1,4 @@
-                                                       # Talk2Hire – AI‑Powered Recruiter App 🤖💼
+  # Talk2Hire – AI‑Powered Recruiter App 🤖💼
 
 <div align="center">
 
