@@ -3,7 +3,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Calendar, Clock, MessageCircleWarning } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { toast } from "sonner";
 import Form from "./_components/Form";
@@ -13,6 +13,7 @@ import QuestionList from "./_components/QuestionList";
 // Create a wrapper component that uses useSearchParams
 function CreateInterviewContent() {
     const router = useRouter();
+    const searchParams = useSearchParams(); // Get search params
     const [step, setStep] = useState(1);
     const [showBackAlert, setShowBackAlert] = useState(false);
     const [showDashboardAlert, setShowDashboardAlert] = useState(false);
@@ -32,7 +33,6 @@ function CreateInterviewContent() {
     const [formData, setFormData] = useState<FormData>({});
     const [questionsGenerated, setQuestionsGenerated] = useState(false);
     const [interviewId, setInterviewId] = useState<string | null>(null);
-    const [searchParamsLoaded, setSearchParamsLoaded] = useState(false);
 
     // Load saved data from localStorage on component mount
     useEffect(() => {
@@ -56,8 +56,26 @@ function CreateInterviewContent() {
                 setQuestionsGenerated(true);
             }
         }
-        setSearchParamsLoaded(true);
     }, []);
+
+    // Get service_type from URL and set it in formData
+    useEffect(() => {
+        const typeFromUrl = searchParams.get('type');
+        if (typeFromUrl && (typeFromUrl === 'video' || typeFromUrl === 'audio')) {
+            setFormData(prev => ({
+                ...prev,
+                service_type: typeFromUrl
+            }));
+
+            // Also save to localStorage
+            const savedFormData = localStorage.getItem('interview_form_data');
+            if (savedFormData) {
+                const parsedData = JSON.parse(savedFormData);
+                parsedData.service_type = typeFromUrl;
+                localStorage.setItem('interview_form_data', JSON.stringify(parsedData));
+            }
+        }
+    }, [searchParams]);
 
     // Save form data to localStorage whenever it changes
     useEffect(() => {
@@ -202,21 +220,6 @@ function CreateInterviewContent() {
         ];
         return steps[stepNumber - 1];
     };
-
-    if (!searchParamsLoaded) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/30 to-blue-50/30 py-8">
-                <div className="px-6 md:px-12 lg:px-24 xl:px-32 max-w-6xl mx-auto">
-                    <div className="flex items-center justify-center h-64">
-                        <div className="text-center">
-                            <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                            <p className="text-lg text-slate-600">Loading interview creator...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/30 to-blue-50/30 py-8">
