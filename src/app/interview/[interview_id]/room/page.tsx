@@ -66,11 +66,16 @@ function DiscussionRoom() {
     // NEW: State for AI message and speaking status
     const [currentAIMessage, setCurrentAIMessage] = useState<string | null>(null);
     const [isAISpeaking, setIsAISpeaking] = useState(false);
+    // TTS state for audio mode
+    const [ttsVoices, setTTSVoices] = useState<SpeechSynthesisVoice[]>([]);
+    const [ttsReady, setTTSReady] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const lastSentTranscriptRef = useRef<string>("");
     const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
     const interviewStartTimeRef = useRef<number | null>(null);
+    // TTS refs
+    const ttsUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
     const { user } = useUser() as {
         user: {
@@ -87,6 +92,119 @@ function DiscussionRoom() {
         browserSupportsSpeechRecognition,
         isMicrophoneAvailable
     } = useSpeechRecognition();
+
+    // Initialize TTS
+    useEffect(() => {
+        const loadVoices = () => {
+            const voices = window.speechSynthesis.getVoices();
+            setTTSVoices(voices);
+            if (voices.length > 0) {
+                setTTSReady(true);
+                console.log("✅ TTS Voices loaded:", voices.map(v => v.name));
+            }
+        };
+
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            loadVoices();
+            // Some browsers load voices asynchronously
+            window.speechSynthesis.onvoiceschanged = loadVoices;
+        } else {
+            console.error("❌ TTS not supported in this browser");
+        }
+
+        return () => {
+            if (typeof window !== 'undefined' && window.speechSynthesis) {
+                window.speechSynthesis.onvoiceschanged = null;
+            }
+        };
+    }, []);
+
+    // Speak text function for audio mode
+    const speakText = (text: string) => {
+        if (!ttsReady || !text) return;
+
+        // Stop any ongoing speech
+        if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.cancel();
+        }
+
+        // Create new utterance
+        const utterance = new SpeechSynthesisUtterance(text);
+        ttsUtteranceRef.current = utterance;
+
+        // Select voice
+        const voices = ttsVoices;
+        // Prefer female voices for interview context
+        const femaleVoice = voices.find(voice =>
+            voice.name.toLowerCase().includes('female') ||
+            voice.name.toLowerCase().includes('samantha') ||
+            voice.name.toLowerCase().includes('zira')
+        ) || voices[0];
+
+        if (femaleVoice) {
+            utterance.voice = femaleVoice;
+        }
+
+        // Configure voice settings
+        utterance.rate = 1.0; // Normal speed
+        utterance.pitch = 1.0; // Normal pitch
+        utterance.volume = 1.0; // Max volume
+
+        // Event handlers
+        utterance.onstart = () => {
+            console.log("🎤 TTS started speaking");
+            setIsAISpeaking(true);
+        };
+
+        utterance.onend = () => {
+            console.log("✅ TTS finished speaking");
+            setIsAISpeaking(false);
+            setCurrentAIMessage(null);
+            ttsUtteranceRef.current = null;
+        };
+
+        utterance.onerror = (event) => {
+            console.error("❌ TTS error:", event);
+            setIsAISpeaking(false);
+            setCurrentAIMessage(null);
+            ttsUtteranceRef.current = null;
+        };
+
+        // Start speaking
+        window.speechSynthesis.speak(utterance);
+    };
+
+    // Stop TTS function
+    const stopTTS = () => {
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+            setIsAISpeaking(false);
+            ttsUtteranceRef.current = null;
+        }
+    };
+
+    // Handle TTS for audio mode
+    useEffect(() => {
+        if (interviewDetails?.service_type === 'audio' &&
+            currentAIMessage &&
+            !isAISpeaking &&
+            isCallActive) {
+
+            console.log("🎯 Audio mode - Speaking message:", currentAIMessage.substring(0, 50));
+
+            // Small delay to ensure state is ready
+            setTimeout(() => {
+                speakText(currentAIMessage);
+            }, 300);
+        }
+    }, [currentAIMessage, interviewDetails?.service_type, isCallActive]);
+
+    // Clean up TTS on unmount
+    useEffect(() => {
+        return () => {
+            stopTTS();
+        };
+    }, []);
 
     useEffect(() => {
         setMounted(true);
@@ -244,9 +362,11 @@ function DiscussionRoom() {
                         setCurrentQuestionType(aiMessage.questionType || 'general');
                     }
 
-                    // Trigger Avatar
+                    // Trigger Avatar - Set AI message for both video and audio modes
                     setCurrentAIMessage(aiMessage.text);
-                    setIsAISpeaking(true);
+
+                    // For video mode, setIsAISpeaking is handled by VideoAvatarView
+                    // For audio mode, TTS will be triggered by useEffect above
 
                 }, index * 1000);
             });
@@ -291,7 +411,7 @@ function DiscussionRoom() {
 
                     if (index === 0) {
                         setCurrentAIMessage(aiMessage.text);
-                        setIsAISpeaking(true);
+                        // Audio mode TTS will be triggered by useEffect
                     }
                 }, index * 1500);
             });
@@ -307,6 +427,9 @@ function DiscussionRoom() {
 
     const handleEndCall = async () => {
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+
+        // Stop TTS if speaking
+        stopTTS();
 
         setIsAISpeaking(false);
         setCurrentAIMessage(null);
@@ -349,7 +472,10 @@ function DiscussionRoom() {
             }
         };
         GetDetails();
-        return () => { SpeechRecognition.stopListening(); };
+        return () => {
+            SpeechRecognition.stopListening();
+            stopTTS();
+        };
     }, [interviewId]);
 
     const getTimerColor = () => {
@@ -366,6 +492,17 @@ function DiscussionRoom() {
     );
 
     if (!browserSupportsSpeechRecognition) return <div className="p-10 text-center">Browser not supported.</div>;
+
+    // Separate props for VideoAvatarView and AudioAvatarView
+    const baseAvatarProps = {
+        expert,
+        isSpeaking: isAISpeaking,
+        isLoading,
+        timeExceeded,
+        listening,
+        userPicture: user?.picture,
+        userName: user?.name
+    };
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
@@ -415,13 +552,7 @@ function DiscussionRoom() {
                         <div className="flex-1 relative bg-gray-900">
                             {interviewDetails?.service_type === 'video' ? (
                                 <VideoAvatarView
-                                    expert={expert}
-                                    isSpeaking={isAISpeaking}
-                                    isLoading={isLoading}
-                                    timeExceeded={timeExceeded}
-                                    listening={listening}
-                                    userPicture={user?.picture}
-                                    userName={user?.name}
+                                    {...baseAvatarProps}
                                     aiMessage={currentAIMessage}
                                     onMessageComplete={() => {
                                         setIsAISpeaking(false);
@@ -430,13 +561,7 @@ function DiscussionRoom() {
                                 />
                             ) : (
                                 <AudioAvatarView
-                                    expert={expert}
-                                    isSpeaking={isAISpeaking}
-                                    isLoading={isLoading}
-                                    timeExceeded={timeExceeded}
-                                    listening={listening}
-                                    userPicture={user?.picture}
-                                    userName={user?.name}
+                                    {...baseAvatarProps}
                                 />
                             )}
                         </div>
