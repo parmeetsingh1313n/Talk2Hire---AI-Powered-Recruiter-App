@@ -1,34 +1,45 @@
 // src/app/(main)/scheduled-interview/[interview_id]/details/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
-import Link from "next/link";
-import { format } from "date-fns";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import { format } from "date-fns";
 import {
-    ArrowLeft, Calendar, Clock, User, Briefcase, FileText, Star,
-    MessageSquare, Download, Copy, CheckCircle, XCircle, Users,
-    PieChart, Home, Brain, TrendingUp, Award, BarChart3
+    ArrowLeft,
+    Award, BarChart3,
+    Brain,
+    Briefcase,
+    Calendar,
+    CheckCircle,
+    Clock,
+    Copy,
+    Download,
+    FileText,
+    Home,
+    MessageSquare,
+    Star,
+    User,
+    Users,
+    XCircle
 } from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { supabase } from "../../../../../../services/supabaseClient";
-import { InterviewConversation } from "./_components/types";
-
+import { InterviewConversation, InterviewFeedback } from "./_components/types";
 
 export default function InterviewDetailsPage() {
     const params = useParams();
     const interviewId = params.interview_id as string;
 
     const [interview, setInterview] = useState<any | null>(null);
-    const [feedbacks, setFeedbacks] = useState<any[]>([]);
+    const [feedbacks, setFeedbacks] = useState<InterviewFeedback[]>([]);
     const [conversations, setConversations] = useState<InterviewConversation[]>([]);
     const [loading, setLoading] = useState(true);
+    const [candidateStats, setCandidateStats] = useState<Record<string, any>>({});
 
     useEffect(() => {
         fetchInterviewDetails();
@@ -45,11 +56,69 @@ export default function InterviewDetailsPage() {
             setInterview(interviewRes.data);
             setFeedbacks(feedbacksRes.data || []);
             setConversations(conversationsRes.data || []);
+
+            // Calculate stats for each candidate
+            calculateCandidateStats(feedbacksRes.data || [], conversationsRes.data || []);
         } catch (error) {
             console.error('Error fetching interview details:', error);
         } finally {
             setLoading(false);
         }
+    };
+
+    const calculateCandidateStats = (feedbacks: InterviewFeedback[], conversations: InterviewConversation[]) => {
+        const stats: Record<string, any> = {};
+
+        feedbacks.forEach(feedback => {
+            // Get conversations for this specific feedback
+            const candidateConversations = conversations.filter(
+                conv => conv.interview_feedback_id === feedback.id
+            );
+
+            // Calculate ratings from Interview-Feedback table
+            let technicalRating = 0;
+            let communicationRating = 0;
+            let problemSolvingRating = 0;
+            let experienceRating = 0;
+            let avgRating = 0;
+
+            if (feedback.feedback?.rating) {
+                const rating = feedback.feedback.rating;
+                technicalRating = rating.technicalSkills || 0;
+                communicationRating = rating.communication || 0;
+                problemSolvingRating = rating.problemSolving || 0;
+                experienceRating = rating.experience || 0;
+
+                // Calculate overall average
+                const ratings = [technicalRating, communicationRating, problemSolvingRating, experienceRating]
+                    .filter(r => r > 0);
+
+                if (ratings.length > 0) {
+                    avgRating = ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
+                }
+            } else {
+                // Fallback to conversation ratings
+                if (candidateConversations.length > 0) {
+                    technicalRating = candidateConversations.reduce((sum, c) => sum + (c.technical_skill_rating || 0), 0) / candidateConversations.length;
+                    communicationRating = candidateConversations.reduce((sum, c) => sum + (c.communication_rating || 0), 0) / candidateConversations.length;
+                    problemSolvingRating = candidateConversations.reduce((sum, c) => sum + (c.problem_solving_rating || 0), 0) / candidateConversations.length;
+                    experienceRating = candidateConversations.reduce((sum, c) => sum + (c.experience_relevance_rating || 0), 0) / candidateConversations.length;
+                    avgRating = candidateConversations.reduce((sum, c) => sum + (c.overall_rating || 0), 0) / candidateConversations.length;
+                }
+            }
+
+            stats[feedback.id] = {
+                conversationCount: candidateConversations.length,
+                technicalRating: technicalRating.toFixed(1),
+                communicationRating: communicationRating.toFixed(1),
+                problemSolvingRating: problemSolvingRating.toFixed(1),
+                experienceRating: experienceRating.toFixed(1),
+                avgRating: avgRating.toFixed(1),
+                conversations: candidateConversations
+            };
+        });
+
+        setCandidateStats(stats);
     };
 
     const getQuestionText = (question: any): string => {
@@ -64,39 +133,34 @@ export default function InterviewDetailsPage() {
         return JSON.stringify(description).slice(0, 200);
     };
 
-    const calculateDetailedRating = (feedback: any) => {
-        try {
-            if (!feedback.feedback?.rating) return null;
-            const ratingObj = feedback.feedback.rating;
-            const ratings = Object.entries(ratingObj)
-                .filter(([_, value]) => typeof value === 'number')
-                .map(([key, value]) => ({
-                    category: key.replace(/([A-Z])/g, ' $1').trim(),
-                    rating: value as number
-                }));
-            
-            const avg = ratings.length > 0
-                ? ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length
-                : 0;
+    // Calculate overall interview stats
+    const calculateOverallStats = () => {
+        let totalResponses = 0;
+        let totalAvgRating = 0;
+        let totalCandidates = feedbacks.length;
+        let recommendedCount = 0;
 
-            return { ratings, average: avg };
-        } catch (error) {
-            return null;
-        }
-    };
-
-    const getCandidateConversationStats = (candidateEmail: string) => {
-        const candidateConvs = conversations;
-        if (candidateConvs.length === 0) return null;
+        feedbacks.forEach(feedback => {
+            const stats = candidateStats[feedback.id];
+            if (stats) {
+                totalResponses += stats.conversationCount;
+                totalAvgRating += parseFloat(stats.avgRating);
+            }
+            if (feedback.recommended) {
+                recommendedCount++;
+            }
+        });
 
         return {
-            total: candidateConvs.length,
-            avgTechnical: candidateConvs.reduce((s, c) => s + (c.technical_skill_rating || 0), 0) / candidateConvs.length,
-            avgCommunication: candidateConvs.reduce((s, c) => s + (c.communication_rating || 0), 0) / candidateConvs.length,
-            avgProblemSolving: candidateConvs.reduce((s, c) => s + (c.problem_solving_rating || 0), 0) / candidateConvs.length,
-            avgExperience: candidateConvs.reduce((s, c) => s + (c.experience_relevance_rating || 0), 0) / candidateConvs.length,
-            avgOverall: candidateConvs.reduce((s, c) => s + (c.overall_rating || 0), 0) / candidateConvs.length
+            totalResponses,
+            avgOverallRating: totalCandidates > 0 ? (totalAvgRating / totalCandidates).toFixed(1) : "0.0",
+            recommendedCount,
+            totalCandidates
         };
+    };
+
+    const getCandidateName = (feedback: InterviewFeedback): string => {
+        return feedback.userName || feedback.userEmail.split('@')[0] || 'Candidate';
     };
 
     if (loading) {
@@ -138,11 +202,7 @@ export default function InterviewDetailsPage() {
         questionListArray = [];
     }
 
-    // Calculate aggregate stats
-    const totalResponses = conversations.length;
-    const avgOverallRating = totalResponses > 0
-        ? conversations.reduce((s, c) => s + (c.overall_rating || 0), 0) / totalResponses
-        : 0;
+    const overallStats = calculateOverallStats();
 
     return (
         <div className="container mx-auto px-4 py-6 space-y-6">
@@ -181,7 +241,7 @@ export default function InterviewDetailsPage() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">{feedbacks.length}</div>
+                        <div className="text-2xl font-bold">{overallStats.totalCandidates}</div>
                     </CardContent>
                 </Card>
 
@@ -193,7 +253,7 @@ export default function InterviewDetailsPage() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">{totalResponses}</div>
+                        <div className="text-2xl font-bold">{overallStats.totalResponses}</div>
                     </CardContent>
                 </Card>
 
@@ -205,7 +265,7 @@ export default function InterviewDetailsPage() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">{avgOverallRating.toFixed(1)}/10</div>
+                        <div className="text-2xl font-bold">{overallStats.avgOverallRating}/10</div>
                     </CardContent>
                 </Card>
 
@@ -218,7 +278,7 @@ export default function InterviewDetailsPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">
-                            {feedbacks.filter(f => f.recommended).length}/{feedbacks.length}
+                            {overallStats.recommendedCount}/{overallStats.totalCandidates}
                         </div>
                     </CardContent>
                 </Card>
@@ -308,8 +368,7 @@ export default function InterviewDetailsPage() {
                         <CardContent>
                             <div className="space-y-4">
                                 {feedbacks.map((feedback) => {
-                                    const ratingData = calculateDetailedRating(feedback);
-                                    const stats = getCandidateConversationStats(feedback.userEmail);
+                                    const stats = candidateStats[feedback.id];
 
                                     return (
                                         <div key={feedback.id} className="border rounded-lg p-4 space-y-4">
@@ -319,7 +378,7 @@ export default function InterviewDetailsPage() {
                                                         <User className="w-5 h-5 text-white" />
                                                     </div>
                                                     <div>
-                                                        <p className="font-medium">{feedback.userName || feedback.userEmail.split('@')[0]}</p>
+                                                        <p className="font-medium">{getCandidateName(feedback)}</p>
                                                         <p className="text-sm text-gray-500">{feedback.userEmail}</p>
                                                     </div>
                                                 </div>
@@ -340,27 +399,27 @@ export default function InterviewDetailsPage() {
                                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                                                     <div className="text-center p-3 bg-blue-50 rounded-lg">
                                                         <Brain className="w-4 h-4 mx-auto mb-1 text-blue-600" />
-                                                        <div className="text-lg font-bold">{stats.avgTechnical.toFixed(1)}</div>
+                                                        <div className="text-lg font-bold">{stats.technicalRating}</div>
                                                         <div className="text-xs text-gray-600">Technical</div>
                                                     </div>
                                                     <div className="text-center p-3 bg-green-50 rounded-lg">
                                                         <MessageSquare className="w-4 h-4 mx-auto mb-1 text-green-600" />
-                                                        <div className="text-lg font-bold">{stats.avgCommunication.toFixed(1)}</div>
+                                                        <div className="text-lg font-bold">{stats.communicationRating}</div>
                                                         <div className="text-xs text-gray-600">Communication</div>
                                                     </div>
                                                     <div className="text-center p-3 bg-yellow-50 rounded-lg">
                                                         <Award className="w-4 h-4 mx-auto mb-1 text-yellow-600" />
-                                                        <div className="text-lg font-bold">{stats.avgProblemSolving.toFixed(1)}</div>
+                                                        <div className="text-lg font-bold">{stats.problemSolvingRating}</div>
                                                         <div className="text-xs text-gray-600">Problem Solving</div>
                                                     </div>
                                                     <div className="text-center p-3 bg-purple-50 rounded-lg">
                                                         <BarChart3 className="w-4 h-4 mx-auto mb-1 text-purple-600" />
-                                                        <div className="text-lg font-bold">{stats.avgExperience.toFixed(1)}</div>
+                                                        <div className="text-lg font-bold">{stats.experienceRating}</div>
                                                         <div className="text-xs text-gray-600">Experience</div>
                                                     </div>
                                                     <div className="text-center p-3 bg-orange-50 rounded-lg">
                                                         <Star className="w-4 h-4 mx-auto mb-1 text-orange-600" />
-                                                        <div className="text-lg font-bold">{stats.avgOverall.toFixed(1)}</div>
+                                                        <div className="text-lg font-bold">{stats.avgRating}</div>
                                                         <div className="text-xs text-gray-600">Overall</div>
                                                     </div>
                                                 </div>
@@ -368,7 +427,7 @@ export default function InterviewDetailsPage() {
 
                                             <div className="flex items-center gap-2 text-sm text-gray-600">
                                                 <MessageSquare className="w-4 h-4" />
-                                                <span>{stats?.total || 0} responses</span>
+                                                <span>{stats?.conversationCount || 0} responses</span>
                                                 <span className="mx-2">•</span>
                                                 <Calendar className="w-4 h-4" />
                                                 <span>{format(new Date(feedback.created_at), 'MMM dd, yyyy')}</span>
@@ -392,16 +451,18 @@ export default function InterviewDetailsPage() {
                                                         <DialogHeader>
                                                             <DialogTitle>Detailed Feedback</DialogTitle>
                                                             <DialogDescription>
-                                                                Complete evaluation for {feedback.userName || feedback.userEmail}
+                                                                Complete evaluation for {getCandidateName(feedback)}
                                                             </DialogDescription>
                                                         </DialogHeader>
                                                         <div className="space-y-4">
-                                                            {ratingData && (
+                                                            {feedback.feedback?.rating && (
                                                                 <div className="grid grid-cols-2 gap-4">
-                                                                    {ratingData.ratings.map((rating) => (
-                                                                        <div key={rating.category} className="p-4 bg-gray-50 rounded-lg">
-                                                                            <div className="text-sm text-gray-600 capitalize">{rating.category}</div>
-                                                                            <div className="text-2xl font-bold mt-1">{rating.rating}</div>
+                                                                    {Object.entries(feedback.feedback.rating).map(([key, value]) => (
+                                                                        <div key={key} className="p-4 bg-gray-50 rounded-lg">
+                                                                            <div className="text-sm text-gray-600 capitalize">
+                                                                                {key.replace(/([A-Z])/g, ' $1').trim()}
+                                                                            </div>
+                                                                            <div className="text-2xl font-bold mt-1">{value}</div>
                                                                             <div className="text-sm text-gray-500">/10</div>
                                                                         </div>
                                                                     ))}
@@ -447,27 +508,27 @@ export default function InterviewDetailsPage() {
                             <div className="space-y-3">
                                 <div className="flex justify-between items-center">
                                     <span className="text-sm text-gray-600">Total Candidates</span>
-                                    <span className="font-bold">{feedbacks.length}</span>
+                                    <span className="font-bold">{overallStats.totalCandidates}</span>
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-sm text-gray-600">Recommended</span>
                                     <span className="font-bold text-green-600">
-                                        {feedbacks.filter(f => f.recommended).length}
+                                        {overallStats.recommendedCount}
                                     </span>
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-sm text-gray-600">Not Recommended</span>
                                     <span className="font-bold text-red-600">
-                                        {feedbacks.filter(f => !f.recommended).length}
+                                        {overallStats.totalCandidates - overallStats.recommendedCount}
                                     </span>
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-sm text-gray-600">Total Responses</span>
-                                    <span className="font-bold">{totalResponses}</span>
+                                    <span className="font-bold">{overallStats.totalResponses}</span>
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-sm text-gray-600">Avg Rating</span>
-                                    <span className="font-bold">{avgOverallRating.toFixed(1)}/10</span>
+                                    <span className="font-bold">{overallStats.avgOverallRating}/10</span>
                                 </div>
                             </div>
                         </CardContent>
