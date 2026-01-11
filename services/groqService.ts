@@ -70,6 +70,7 @@ export interface ConversationAnalysis {
 export interface ConversationRecord {
     id?: string;
     interview_id: string;
+    interview_feedback_id: number; // ✅ REQUIRED: MUST be included
     question_sequence: number;
     question_type: string;
     ai_question: string;
@@ -79,8 +80,8 @@ export interface ConversationRecord {
     improvement_feedback?: string;
     technical_skill_rating?: number;
     communication_rating?: number;
-    problem_solving_rating?: number;  // Changed from required to optional
-    experience_relevance_rating?: number;  // Changed from required to optional
+    problem_solving_rating?: number;
+    experience_relevance_rating?: number;
     overall_rating?: number;
     keywords_matched?: string[];
     analysis_insights?: string;
@@ -107,8 +108,34 @@ export function getConversationHistory(sessionId: string): ConversationEntry[] {
 }
 
 // Get stored conversation history from Supabase
-export async function getStoredConversationHistory(interviewId: string): Promise<ConversationRecord[]> {
+export async function getStoredConversationHistory(interviewFeedbackId: number): Promise<ConversationRecord[]> {
     try {
+        console.log('🔍 Fetching conversation history for feedback_id:', interviewFeedbackId);
+
+        const { data, error } = await supabase
+            .from('Interview-Conversation')
+            .select('*')
+            .eq('interview_feedback_id', interviewFeedbackId)
+            .order('question_sequence', { ascending: true });
+
+        if (error) {
+            console.error('❌ Error fetching conversation history:', error);
+            return [];
+        }
+
+        console.log(`✅ Found ${data?.length || 0} conversation records for feedback_id:`, interviewFeedbackId);
+        return data || [];
+    } catch (error) {
+        console.error('❌ Error in getStoredConversationHistory:', error);
+        return [];
+    }
+}
+
+// ✅ NEW: Get conversation history by interview_id as fallback (for backward compatibility)
+export async function getConversationHistoryByInterviewId(interviewId: string): Promise<ConversationRecord[]> {
+    try {
+        console.log('🔍 Fetching conversation history for interview_id:', interviewId);
+
         const { data, error } = await supabase
             .from('Interview-Conversation')
             .select('*')
@@ -120,19 +147,31 @@ export async function getStoredConversationHistory(interviewId: string): Promise
             return [];
         }
 
+        console.log(`✅ Found ${data?.length || 0} conversation records`);
         return data || [];
     } catch (error) {
-        console.error('❌ Error in getStoredConversationHistory:', error);
+        console.error('❌ Error in getConversationHistoryByInterviewId:', error);
         return [];
     }
 }
 
 export async function analyzeAndStoreConversation(
-    conversationRecord: Omit<ConversationRecord, 'analysis'>
-): Promise<ConversationAnalysis> {
+    conversationRecord: ConversationRecord // ✅ Changed: Now accepts full ConversationRecord
+): Promise<void> {
     try {
-        console.log('🤖 Analyzing conversation for question:', conversationRecord.question_sequence);
+        console.log('🤖 Storing conversation analysis:', {
+            interview_id: conversationRecord.interview_id,
+            interview_feedback_id: conversationRecord.interview_feedback_id,
+            question_sequence: conversationRecord.question_sequence
+        });
 
+        // ✅ CRITICAL: Ensure interview_feedback_id is provided
+        if (!conversationRecord.interview_feedback_id) {
+            console.error('❌ interview_feedback_id is required but not provided');
+            throw new Error('interview_feedback_id is required');
+        }
+
+        // Generate analysis using AI
         const analysisPrompt = `
 Analyze this interview Q&A exchange and provide detailed feedback:
 
@@ -141,9 +180,6 @@ QUESTION (${conversationRecord.question_type}):
 
 CANDIDATE'S ANSWER:
 "${conversationRecord.candidate_answer}"
-
-EXPECTED AI RESPONSE:
-"${conversationRecord.ai_response}"
 
 Please provide a comprehensive analysis in this EXACT JSON format:
 {
@@ -166,6 +202,8 @@ Rating Guidelines (1-10 scale):
 - Overall: Composite score based on all factors
 
 Be constructive, professional, and specific in your feedback.`;
+
+        const AVAILABLE_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"];
 
         const completion = await groq.chat.completions.create({
             model: AVAILABLE_MODELS[0],
@@ -194,14 +232,20 @@ Be constructive, professional, and specific in your feedback.`;
             throw new Error("No valid JSON found in analysis response");
         }
 
-        const analysisData: ConversationAnalysis = JSON.parse(jsonMatch[0]);
+        const analysisData = JSON.parse(jsonMatch[0]);
 
-        // Store in Supabase
+        // ✅ Store in Supabase with ALL required fields
         const { data, error } = await supabase
             .from('Interview-Conversation')
             .insert([
                 {
-                    ...conversationRecord,
+                    interview_id: conversationRecord.interview_id,
+                    interview_feedback_id: conversationRecord.interview_feedback_id, // ✅ This is critical
+                    question_sequence: conversationRecord.question_sequence,
+                    question_type: conversationRecord.question_type,
+                    ai_question: conversationRecord.ai_question,
+                    candidate_answer: conversationRecord.candidate_answer,
+                    ai_response: conversationRecord.ai_response,
                     expected_answer: analysisData.expected_answer,
                     improvement_feedback: analysisData.improvement_feedback,
                     technical_skill_rating: analysisData.technical_skill_rating,
@@ -210,7 +254,8 @@ Be constructive, professional, and specific in your feedback.`;
                     experience_relevance_rating: analysisData.experience_relevance_rating,
                     overall_rating: analysisData.overall_rating,
                     keywords_matched: analysisData.keywords_matched,
-                    analysis_insights: analysisData.analysis_insights
+                    analysis_insights: analysisData.analysis_insights,
+                    created_at: new Date().toISOString()
                 }
             ])
             .select();
@@ -220,31 +265,78 @@ Be constructive, professional, and specific in your feedback.`;
             throw error;
         }
 
-        console.log('✅ Conversation analysis stored successfully');
-        return analysisData;
+        console.log('✅ Conversation analysis stored successfully:', {
+            id: data?.[0]?.id,
+            interview_feedback_id: data?.[0]?.interview_feedback_id
+        });
 
     } catch (error) {
         console.error('❌ Error in conversation analysis:', error);
 
-        // Return fallback analysis
-        return {
-            expected_answer: "Analysis unavailable for this response.",
-            improvement_feedback: "Focus on providing more structured and detailed answers.",
-            technical_skill_rating: 5,
-            communication_rating: 5,
-            problem_solving_rating: 5,
-            experience_relevance_rating: 5,
-            overall_rating: 5,
-            keywords_matched: [],
-            analysis_insights: "Analysis could not be generated at this time."
-        };
+        // Even if analysis fails, store the basic conversation data
+        try {
+            await supabase
+                .from('Interview-Conversation')
+                .insert([
+                    {
+                        interview_id: conversationRecord.interview_id,
+                        interview_feedback_id: conversationRecord.interview_feedback_id,
+                        question_sequence: conversationRecord.question_sequence,
+                        question_type: conversationRecord.question_type,
+                        ai_question: conversationRecord.ai_question,
+                        candidate_answer: conversationRecord.candidate_answer,
+                        ai_response: conversationRecord.ai_response,
+                        created_at: new Date().toISOString()
+                    }
+                ]);
+            console.log('✅ Stored basic conversation data (analysis failed)');
+        } catch (fallbackError) {
+            console.error('❌ Failed to store basic conversation data:', fallbackError);
+        }
+    }
+}
+async function fetchResumeByUserDetails(
+    interviewId: string,
+    userName: string,
+    userEmail: string
+): Promise<ResumeData | null> {
+    try {
+        console.log('🔍 Fetching resume data for:', { interviewId, userName, userEmail });
+
+        const { data: resumes, error } = await supabase
+            .from('ResumeData')
+            .select('*')
+            .eq('interview_id', interviewId)
+            .eq('user_name', userName)
+            .eq('user_email', userEmail)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('❌ Error fetching resume by user details:', error);
+            return null;
+        }
+
+        if (resumes && resumes.length > 0) {
+            console.log('✅ Resume data found for candidate:', resumes[0].user_name);
+            return resumes[0];
+        }
+
+        console.warn('⚠️ No resume data found for:', { userName, userEmail });
+        return null;
+    } catch (error) {
+        console.error('❌ Error in fetchResumeByUserDetails:', error);
+        return null;
     }
 }
 
-// Enhanced data fetching
-async function fetchInterviewData(interviewId: string): Promise<{ interview: InterviewData | null, resume: ResumeData | null }> {
+async function fetchInterviewData(
+    interviewId: string,
+    candidateName?: string,
+    candidateEmail?: string
+): Promise<{ interview: InterviewData | null, resume: ResumeData | null }> {
     try {
         console.log('🔍 Fetching data for interview_id:', interviewId);
+        console.log('👤 Candidate:', { candidateName, candidateEmail });
 
         // Fetch interview details
         const { data: interviewData, error: interviewError } = await supabase
@@ -262,21 +354,74 @@ async function fetchInterviewData(interviewId: string): Promise<{ interview: Int
             });
         }
 
-        // Fetch resume data
+        // Fetch resume data with priority:
+        // 1. By interview_id + name + email (exact match)
+        // 2. By interview_id + email (email match)
+        // 3. By interview_id only (fallback)
         let resumeData = null;
-        const { data: resumes, error: resumeError } = await supabase
-            .from('ResumeData')
-            .select('*')
-            .eq('interview_id', interviewId);
 
-        if (resumeError) {
-            console.error('❌ Error fetching resume:', resumeError);
-        } else if (resumes && resumes.length > 0) {
-            resumeData = resumes[0];
-            console.log('✅ Resume data loaded:', {
+        if (candidateName && candidateEmail) {
+            // Try exact match first
+            let query = supabase
+                .from('ResumeData')
+                .select('*')
+                .eq('interview_id', interviewId)
+                .eq('user_email', candidateEmail)
+                .eq('user_name', candidateName)
+                .order('created_at', { ascending: false });
+
+            const { data: exactMatch, error: exactError } = await query;
+
+            if (!exactError && exactMatch && exactMatch.length > 0) {
+                resumeData = exactMatch[0];
+                console.log('✅ Resume found (exact match):', resumeData.user_name);
+            } else {
+                // Try email match only
+                const { data: emailMatch, error: emailError } = await supabase
+                    .from('ResumeData')
+                    .select('*')
+                    .eq('interview_id', interviewId)
+                    .eq('user_email', candidateEmail)
+                    .order('created_at', { ascending: false });
+
+                if (!emailError && emailMatch && emailMatch.length > 0) {
+                    resumeData = emailMatch[0];
+                    console.log('✅ Resume found (email match):', resumeData.user_name);
+                } else {
+                    // Fallback: any resume for this interview
+                    const { data: anyResume, error: anyError } = await supabase
+                        .from('ResumeData')
+                        .select('*')
+                        .eq('interview_id', interviewId)
+                        .order('created_at', { ascending: false })
+                        .limit(1);
+
+                    if (!anyError && anyResume && anyResume.length > 0) {
+                        resumeData = anyResume[0];
+                        console.log('⚠️ Using fallback resume:', resumeData.user_name);
+                    }
+                }
+            }
+        } else {
+            // No candidate details provided, get any resume
+            const { data: resumes, error: resumeError } = await supabase
+                .from('ResumeData')
+                .select('*')
+                .eq('interview_id', interviewId)
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            if (!resumeError && resumes && resumes.length > 0) {
+                resumeData = resumes[0];
+                console.log('✅ Resume loaded (no candidate filter):', resumeData.user_name);
+            }
+        }
+
+        if (resumeData) {
+            console.log('📄 Resume data loaded successfully:', {
                 name: resumeData.user_name,
+                email: resumeData.user_email,
                 experience: resumeData.experience_years,
-                skills: resumeData.technical_skills,
                 projects: resumeData.projects?.length || 0
             });
         } else {
@@ -293,10 +438,37 @@ async function fetchInterviewData(interviewId: string): Promise<{ interview: Int
     }
 }
 
+
+// Validate that resume data belongs to the candidate
+function validateResumeForCandidate(
+    resume: ResumeData,
+    candidateName: string,
+    candidateEmail: string
+): boolean {
+    if (!resume) return false;
+
+    const nameMatch = resume.user_name?.toLowerCase() === candidateName?.toLowerCase();
+    const emailMatch = resume.user_email?.toLowerCase() === candidateEmail?.toLowerCase();
+
+    if (nameMatch && emailMatch) {
+        console.log('✅ Resume validated for candidate:', candidateName);
+        return true;
+    }
+
+    console.warn('⚠️ Resume mismatch:', {
+        resumeName: resume.user_name,
+        candidateName,
+        resumeEmail: resume.user_email,
+        candidateEmail
+    });
+
+    return false;
+}
 // Generate human-like dynamic greeting
 async function generateDynamicGreeting(jobPosition: string, candidateName?: string, resumeData?: ResumeData): Promise<string> {
+    const actualName = resumeData?.user_name || candidateName || '';
     try {
-        const nameContext = candidateName ? ` for ${candidateName}` : '';
+        const nameContext = actualName ? ` for ${actualName}` : '';
         let experienceContext = '';
 
         if (resumeData) {
@@ -329,7 +501,7 @@ async function generateDynamicGreeting(jobPosition: string, candidateName?: stri
             `Hello! I'm really looking forward to our conversation about the ${jobPosition} role today.`;
     } catch (error) {
         console.error('Error generating dynamic greeting:', error);
-        return `Hello! I'm excited to discuss the ${jobPosition} position with you today.`;
+        return `Hello${actualName ? ` ${actualName}` : ''}! I'm excited to discuss the ${jobPosition} position with you today.`;
     }
 }
 
@@ -701,7 +873,9 @@ export async function getAIResponse(
     sessionId: string = "default",
     elapsedTime?: number,
     totalDuration?: number,
-    timeExceeded?: boolean
+    timeExceeded?: boolean,
+    candidateName?: string,
+    candidateEmail?: string
 ): Promise<{ messages: AIMessage[] }> {
 
     // Initialize session if needed
@@ -709,8 +883,10 @@ export async function getAIResponse(
         conversationHistory.set(sessionId, []);
 
         console.log('🚀 Initializing new session:', sessionId);
+        console.log('👤 Candidate details:', { candidateName, candidateEmail });
 
-        const { interview, resume } = await fetchInterviewData(sessionId);
+        // ✅ FIXED: Use the unified fetchInterviewData function
+        const { interview, resume } = await fetchInterviewData(sessionId, candidateName, candidateEmail);
 
         sessionDataStore.set(sessionId, {
             interviewData: interview || undefined,
@@ -721,8 +897,15 @@ export async function getAIResponse(
             dataLoaded: !!(interview || resume),
             timeExceeded: false
         });
+
+        if (resume) {
+            console.log('✅ Resume linked to candidate:', resume.user_name, resume.user_email);
+        } else {
+            console.warn('⚠️ No resume data loaded for this candidate');
+        }
     }
 
+    // Retrieve session data
     const history = conversationHistory.get(sessionId)!;
     const sessionData = sessionDataStore.get(sessionId)!;
 
@@ -758,10 +941,10 @@ export async function getAIResponse(
     // Handle initial greeting
     if (!message) {
         const jobPosition = sessionData.interviewData?.jobPosition || 'this position';
-        const candidateName = sessionData.resumeData?.user_name;
+        const resumeCandidateName = sessionData.resumeData?.user_name; // Different name to avoid shadowing
         const duration = sessionData.interviewData?.duration || 'this interview';
 
-        const dynamicGreeting = await generateDynamicGreeting(jobPosition, candidateName, sessionData.resumeData);
+        const dynamicGreeting = await generateDynamicGreeting(jobPosition, resumeCandidateName, sessionData.resumeData);
 
         const welcomeMessages: AIMessage[] = [
             {
@@ -817,6 +1000,10 @@ TIME CONTEXT:
 ` : '';
 
         const systemPrompt = `You are "Alex", a senior technical interviewer with 8+ years of experience.
+
+        CANDIDATE INFORMATION:
+        - Name: ${sessionData.resumeData?.user_name || 'Candidate'}
+        - Email: ${sessionData.resumeData?.user_email || 'Not provided'}
 
 ${timeContext}
 
