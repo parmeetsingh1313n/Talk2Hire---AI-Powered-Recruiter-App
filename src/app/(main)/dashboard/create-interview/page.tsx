@@ -3,14 +3,15 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Calendar, Clock, MessageCircleWarning } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation"; // Add useSearchParams
-import { useEffect, useState, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { toast } from "sonner";
 import Form from "./_components/Form";
 import InterviewLink from "./_components/InterviewLink";
 import QuestionList from "./_components/QuestionList";
 
-function CreateInterview() {
+// Create a wrapper component that uses useSearchParams
+function CreateInterviewContent() {
     const router = useRouter();
     const searchParams = useSearchParams(); // Get search params
     const [step, setStep] = useState(1);
@@ -25,7 +26,7 @@ function CreateInterview() {
         schedule_date?: string;
         schedule_time?: string;
         validity?: number;
-        service_type?: string; // Add service_type
+        service_type?: string;
         [key: string]: any;
     };
 
@@ -397,6 +398,26 @@ function CreateInterview() {
                 </AlertDialogContent>
             </AlertDialog>
         </div>
+    )
+}
+
+// Main component with Suspense wrapper
+function CreateInterview() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/30 to-blue-50/30 py-8">
+                <div className="px-6 md:px-12 lg:px-24 xl:px-32 max-w-6xl mx-auto">
+                    <div className="flex items-center justify-center h-64">
+                        <div className="text-center">
+                            <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                            <p className="text-lg text-slate-600">Loading interview creator...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }>
+            <CreateInterviewContent />
+        </Suspense>
     )
 }
 

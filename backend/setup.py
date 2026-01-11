@@ -3,7 +3,6 @@
 Setup script for Resume Analysis Backend
 Run this script to set up the backend environment
 """
-
 import os
 import subprocess
 import sys

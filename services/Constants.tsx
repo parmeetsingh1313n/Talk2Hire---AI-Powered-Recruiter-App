@@ -17,11 +17,6 @@ export const SidebarOptions = [
         path: "/all-interview"
     },
     {
-        name: "Billing",
-        icon: Wallet,
-        path: "/billing"
-    },
-    {
         name: "Settings",
         icon: Settings,
         path: "/settings"

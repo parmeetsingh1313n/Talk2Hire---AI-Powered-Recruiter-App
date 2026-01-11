@@ -34,14 +34,14 @@ import {
 } from "@/components/ui/drawer";
 
 import { ChartPieDonut } from "./ChartPieDonut";
-import { ConversationRecord, getStoredConversationHistory } from "../../../../../../services/groqService";
+import { ConversationRecord, getStoredConversationHistory, getConversationHistoryByInterviewId } from "../../../../../../services/groqService";
 
 interface DetailedReportDialogProps {
-    interviewId: string;
+    interviewFeedbackId: number | null;
     trigger?: React.ReactNode;
 }
 
-export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDialogProps) {
+export function DetailedReportDialog({ interviewFeedbackId, trigger }: DetailedReportDialogProps) {
     const [conversationHistory, setConversationHistory] = useState<ConversationRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [overallStats, setOverallStats] = useState({
@@ -53,14 +53,26 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
     });
 
     useEffect(() => {
-        loadConversationHistory();
-    }, [interviewId]);
+        if (interviewFeedbackId) {
+            loadConversationHistory();
+        }
+    }, [interviewFeedbackId]);
 
     const loadConversationHistory = async () => {
+        if (!interviewFeedbackId) {
+            console.error('❌ No interview feedback ID provided');
+            setLoading(false);
+            return;
+        }
+
         try {
             setLoading(true);
-            // Use getStoredConversationHistory instead of getConversationHistory
-            const history = await getStoredConversationHistory(interviewId);
+            console.log('🔍 Loading conversation history for feedback ID:', interviewFeedbackId);
+
+            // Use the new function that filters by interview_feedback_id
+            const history = await getStoredConversationHistory(interviewFeedbackId);
+            console.log('📊 Found history:', history.length, 'records');
+
             setConversationHistory(history);
 
             // Calculate overall stats
@@ -81,9 +93,11 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                     experience: Math.round(stats.experience / count),
                     overall: Math.round(stats.overall / count)
                 });
+            } else {
+                console.log('⚠️ No conversation history found for this feedback ID');
             }
         } catch (error) {
-            console.error('Error loading conversation history:', error);
+            console.error('❌ Error loading conversation history:', error);
         } finally {
             setLoading(false);
         }
@@ -127,6 +141,25 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
         },
     };
 
+    if (!interviewFeedbackId) {
+        return (
+            <Drawer>
+                <DrawerTrigger asChild>
+                    {trigger || <Button variant="outline">See Detailed Report</Button>}
+                </DrawerTrigger>
+                <DrawerContent className="max-h-[90vh]">
+                    <div className="flex items-center justify-center py-8">
+                        <div className="text-center">
+                            <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+                            <p className="mt-4 text-gray-600">No feedback data available yet.</p>
+                            <p className="text-sm text-gray-500">Complete the interview to see your detailed report.</p>
+                        </div>
+                    </div>
+                </DrawerContent>
+            </Drawer>
+        );
+    }
+
     if (loading) {
         return (
             <Drawer>
@@ -138,6 +171,7 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                         <div className="text-center">
                             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
                             <p className="mt-4 text-gray-600">Loading detailed report...</p>
+                            <p className="text-sm text-gray-500">Fetching your conversation analysis</p>
                         </div>
                     </div>
                 </DrawerContent>
@@ -162,6 +196,9 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                                 </DrawerTitle>
                                 <DrawerDescription className="mt-2">
                                     Comprehensive analysis of your interview performance with question-by-question feedback
+                                    <div className="text-xs text-gray-500 mt-1">
+                                        Feedback ID: {interviewFeedbackId} • {conversationHistory.length} questions analyzed
+                                    </div>
                                 </DrawerDescription>
                             </div>
                             <DrawerClose asChild>
@@ -234,139 +271,139 @@ export function DetailedReportDialog({ interviewId, trigger }: DetailedReportDia
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <Accordion type="single" collapsible className="w-full">
-                                    {conversationHistory.map((record, index) => (
-                                        <AccordionItem key={record.id || index} value={`item-${record.id || index}`}>
-                                            <AccordionTrigger className="hover:no-underline px-4">
-                                                <div className="flex items-start gap-4 text-left w-full">
-                                                    <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                                        <span className="text-sm font-bold text-blue-600">
-                                                            {record.question_sequence}
-                                                        </span>
+                                {conversationHistory.length > 0 ? (
+                                    <Accordion type="single" collapsible className="w-full">
+                                        {conversationHistory.map((record, index) => (
+                                            <AccordionItem key={record.id || index} value={`item-${record.id || index}`}>
+                                                <AccordionTrigger className="hover:no-underline px-4">
+                                                    <div className="flex items-start gap-4 text-left w-full">
+                                                        <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                                            <span className="text-sm font-bold text-blue-600">
+                                                                {record.question_sequence}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex-1 min-w-0 overflow-hidden">
+                                                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                                <Badge variant="outline" className="text-xs shrink-0">
+                                                                    {record.question_type}
+                                                                </Badge>
+                                                                <div className="flex items-center gap-1 shrink-0">
+                                                                    <Star className="w-3 h-3 text-yellow-500" />
+                                                                    <span className={`text-sm font-semibold ${getRatingColor(record.overall_rating || 0)}`}>
+                                                                        {record.overall_rating}/10
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                            {/* Make question text wrap properly */}
+                                                            <p className="text-sm font-medium break-words whitespace-normal line-clamp-2 text-left">
+                                                                {record.ai_question}
+                                                            </p>
+                                                        </div>
                                                     </div>
-                                                    <div className="flex-1 min-w-0 overflow-hidden">
-                                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                            <Badge variant="outline" className="text-xs shrink-0">
-                                                                {record.question_type}
-                                                            </Badge>
-                                                            <div className="flex items-center gap-1 shrink-0">
-                                                                <Star className="w-3 h-3 text-yellow-500" />
-                                                                <span className={`text-sm font-semibold ${getRatingColor(record.overall_rating || 0)}`}>
-                                                                    {record.overall_rating}/10
-                                                                </span>
+                                                </AccordionTrigger>
+                                                <AccordionContent>
+                                                    <div className="space-y-6 p-4 bg-gray-50 rounded-lg">
+                                                        {/* Question & Answer Section */}
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            <div>
+                                                                <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
+                                                                    <MessageCircle className="w-4 h-4" />
+                                                                    Your Answer
+                                                                </h4>
+                                                                <div className="bg-white p-3 rounded border text-sm break-words whitespace-pre-wrap">
+                                                                    {record.candidate_answer || "No answer provided"}
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
+                                                                    <CheckCircle2 className="w-4 h-4" />
+                                                                    Expected Answer
+                                                                </h4>
+                                                                <div className="bg-green-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
+                                                                    {record.expected_answer}
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                        {/* Make question text wrap properly */}
-                                                        <p className="text-sm font-medium break-words whitespace-normal line-clamp-2 text-left">
-                                                            {record.ai_question}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </AccordionTrigger>
-                                            <AccordionContent>
-                                                <div className="space-y-6 p-4 bg-gray-50 rounded-lg">
-                                                    {/* Question & Answer Section */}
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                                                        {/* AI Response */}
+                                                        {record.ai_response && (
+                                                            <div>
+                                                                <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
+                                                                    <Users className="w-4 h-4" />
+                                                                    Interviewer's Response
+                                                                </h4>
+                                                                <div className="bg-blue-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
+                                                                    {record.ai_response}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Ratings Grid */}
+                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                            {[
+                                                                { label: "Technical", value: record.technical_skill_rating, icon: Zap },
+                                                                { label: "Communication", value: record.communication_rating, icon: MessageCircle },
+                                                                { label: "Problem Solving", value: record.problem_solving_rating, icon: Lightbulb },
+                                                                { label: "Experience", value: record.experience_relevance_rating, icon: Users },
+                                                            ].map(({ label, value, icon: Icon }) => (
+                                                                <div key={label} className="text-center p-3 bg-white rounded-lg border">
+                                                                    <Icon className="w-6 h-6 mx-auto mb-2 text-blue-600" />
+                                                                    <div className="text-2xl font-bold text-gray-800">{value || 0}</div>
+                                                                    <div className="text-xs text-gray-600">{label}</div>
+                                                                    <div className="text-xs text-gray-500">/10</div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+
+                                                        {/* Improvement Feedback */}
                                                         <div>
                                                             <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
-                                                                <MessageCircle className="w-4 h-4" />
-                                                                Your Answer
+                                                                <AlertCircle className="w-4 h-4" />
+                                                                Improvement Feedback
                                                             </h4>
-                                                            <div className="bg-white p-3 rounded border text-sm break-words whitespace-pre-wrap">
-                                                                {record.candidate_answer || "No answer provided"}
+                                                            <div className="bg-yellow-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
+                                                                {record.improvement_feedback}
                                                             </div>
                                                         </div>
-                                                        <div>
-                                                            <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
-                                                                <CheckCircle2 className="w-4 h-4" />
-                                                                Expected Answer
-                                                            </h4>
-                                                            <div className="bg-green-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
-                                                                {record.expected_answer}
+
+                                                        {/* Analysis Insights */}
+                                                        {record.analysis_insights && (
+                                                            <div>
+                                                                <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
+                                                                    <Lightbulb className="w-4 h-4" />
+                                                                    Key Insights
+                                                                </h4>
+                                                                <div className="bg-purple-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
+                                                                    {record.analysis_insights}
+                                                                </div>
                                                             </div>
-                                                        </div>
+                                                        )}
+
+                                                        {/* Keywords Matched */}
+                                                        {record.keywords_matched && record.keywords_matched.length > 0 && (
+                                                            <div>
+                                                                <h4 className="font-semibold text-sm text-gray-700 mb-2">
+                                                                    Keywords Identified
+                                                                </h4>
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    {record.keywords_matched.map((keyword, idx) => (
+                                                                        <Badge key={idx} variant="secondary" className="text-xs">
+                                                                            {keyword}
+                                                                        </Badge>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
-
-                                                    {/* AI Response */}
-                                                    {record.ai_response && (
-                                                        <div>
-                                                            <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
-                                                                <Users className="w-4 h-4" />
-                                                                Interviewer's Response
-                                                            </h4>
-                                                            <div className="bg-blue-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
-                                                                {record.ai_response}
-                                                            </div>
-                                                        </div>
-                                                    )}
-
-                                                    {/* Ratings Grid */}
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                        {[
-                                                            { label: "Technical", value: record.technical_skill_rating, icon: Zap },
-                                                            { label: "Communication", value: record.communication_rating, icon: MessageCircle },
-                                                            { label: "Problem Solving", value: record.problem_solving_rating, icon: Lightbulb },
-                                                            { label: "Experience", value: record.experience_relevance_rating, icon: Users },
-                                                        ].map(({ label, value, icon: Icon }) => (
-                                                            <div key={label} className="text-center p-3 bg-white rounded-lg border">
-                                                                <Icon className="w-6 h-6 mx-auto mb-2 text-blue-600" />
-                                                                <div className="text-2xl font-bold text-gray-800">{value || 0}</div>
-                                                                <div className="text-xs text-gray-600">{label}</div>
-                                                                <div className="text-xs text-gray-500">/10</div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-
-                                                    {/* Improvement Feedback */}
-                                                    <div>
-                                                        <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
-                                                            <AlertCircle className="w-4 h-4" />
-                                                            Improvement Feedback
-                                                        </h4>
-                                                        <div className="bg-yellow-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
-                                                            {record.improvement_feedback}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Analysis Insights */}
-                                                    {record.analysis_insights && (
-                                                        <div>
-                                                            <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
-                                                                <Lightbulb className="w-4 h-4" />
-                                                                Key Insights
-                                                            </h4>
-                                                            <div className="bg-purple-50 p-3 rounded border text-sm break-words whitespace-pre-wrap">
-                                                                {record.analysis_insights}
-                                                            </div>
-                                                        </div>
-                                                    )}
-
-                                                    {/* Keywords Matched */}
-                                                    {record.keywords_matched && record.keywords_matched.length > 0 && (
-                                                        <div>
-                                                            <h4 className="font-semibold text-sm text-gray-700 mb-2">
-                                                                Keywords Identified
-                                                            </h4>
-                                                            <div className="flex flex-wrap gap-2">
-                                                                {record.keywords_matched.map((keyword, idx) => (
-                                                                    <Badge key={idx} variant="secondary" className="text-xs">
-                                                                        {keyword}
-                                                                    </Badge>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </AccordionContent>
-                                        </AccordionItem>
-                                    ))}
-                                </Accordion>
-
-                                {conversationHistory.length === 0 && (
+                                                </AccordionContent>
+                                            </AccordionItem>
+                                        ))}
+                                    </Accordion>
+                                ) : (
                                     <div className="text-center py-8 text-gray-500">
                                         <MessageCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                                        <p>No conversation analysis available yet.</p>
-                                        <p className="text-sm">Complete an interview to see detailed feedback.</p>
+                                        <p>No conversation analysis available for this feedback.</p>
+                                        <p className="text-sm">The conversation analysis may still be processing.</p>
                                     </div>
                                 )}
                             </CardContent>

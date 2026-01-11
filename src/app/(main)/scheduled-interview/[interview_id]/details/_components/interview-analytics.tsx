@@ -3,19 +3,20 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BarChart3, PieChart, Star, Target, TrendingUp, Users, Brain, MessageCircle, Lightbulb, Award } from "lucide-react";
+import { eachMonthOfInterval, endOfMonth, format, parseISO, startOfMonth, subMonths } from "date-fns";
+import { Award, BarChart3, Brain, Lightbulb, MessageCircle, PieChart, Star, Target, TrendingUp, Users } from "lucide-react";
 import { ChartAreaStacked } from "./charts/chart-area-stacked";
-import { ChartLineDots } from "./charts/chart-line-dots";
-import { ChartRadialText } from "./charts/chart-radial-text";
-import { ChartPieDonut } from "./charts/chart-pie-donut";
-import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from "date-fns";
 import { ChartBarMultiple } from "./charts/chart-bar-multiple";
+import { ChartLineDots } from "./charts/chart-line-dots";
+import { ChartPieDonut } from "./charts/chart-pie-donut";
+import { ChartRadialText } from "./charts/chart-radial-text";
+import { CandidatePerformance, InterviewConversation, InterviewFeedback } from "./types";
 
 interface InterviewAnalyticsProps {
     interviews: any[];
-    candidatePerformances: any[];
-    feedbacks: any[];
-    conversations: any[];
+    candidatePerformances: CandidatePerformance[];
+    feedbacks: InterviewFeedback[];
+    conversations: InterviewConversation[];
 }
 
 export function InterviewAnalytics({ interviews, candidatePerformances, feedbacks, conversations }: InterviewAnalyticsProps) {
@@ -36,26 +37,20 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                 return date >= monthStart && date <= monthEnd;
             });
 
-            const monthFeedbacks = feedbacks.filter(f => {
-                const date = parseISO(f.created_at);
+            const monthPerformances = candidatePerformances.filter(p => {
+                const date = parseISO(p.interview.created_at);
                 return date >= monthStart && date <= monthEnd;
             });
 
-            const monthRatings = monthFeedbacks
-                .map(f => {
-                    if (f.feedback?.rating) {
-                        const ratings = Object.values(f.feedback.rating).filter(r => typeof r === 'number') as number[];
-                        return ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
-                    }
-                    return 0;
-                })
+            const monthRatings = monthPerformances
+                .map(p => p.avgRating)
                 .filter(r => r > 0);
 
             const avgRating = monthRatings.length > 0
                 ? monthRatings.reduce((a, b) => a + b, 0) / monthRatings.length
                 : 0;
 
-            const completedCount = monthFeedbacks.length;
+            const completedCount = monthPerformances.length;
             const completionRate = monthInterviews.length > 0
                 ? (completedCount / monthInterviews.length) * 100
                 : 0;
@@ -63,14 +58,14 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
             return {
                 month: format(month, 'MMM'),
                 interviews: monthInterviews.length,
-                candidates: monthFeedbacks.length,
+                candidates: monthPerformances.length,
                 avgRating: Number(avgRating.toFixed(1)),
                 completionRate: Number(completionRate.toFixed(1))
             };
         });
     };
 
-    // Calculate rating distribution from conversations
+    // Calculate rating distribution from candidate performances
     const getRatingDistribution = () => {
         const distribution = {
             excellent: 0,
@@ -79,8 +74,8 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
             poor: 0
         };
 
-        conversations.forEach(conv => {
-            const rating = conv.overall_rating || 0;
+        candidatePerformances.forEach(performance => {
+            const rating = performance.avgRating || 0;
             if (rating >= 8) distribution.excellent++;
             else if (rating >= 6) distribution.good++;
             else if (rating >= 4) distribution.average++;
@@ -90,20 +85,20 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
         return distribution;
     };
 
-    // Calculate skill-wise performance
+    // Calculate skill-wise performance from candidate performances
     const getSkillPerformance = () => {
-        if (conversations.length === 0) return [];
+        if (candidatePerformances.length === 0) return [];
 
-        const technicalAvg = conversations.reduce((sum, c) => sum + (c.technical_skill_rating || 0), 0) / conversations.length;
-        const communicationAvg = conversations.reduce((sum, c) => sum + (c.communication_rating || 0), 0) / conversations.length;
-        const problemSolvingAvg = conversations.reduce((sum, c) => sum + (c.problem_solving_rating || 0), 0) / conversations.length;
-        const experienceAvg = conversations.reduce((sum, c) => sum + (c.experience_relevance_rating || 0), 0) / conversations.length;
+        const technicalAvg = candidatePerformances.reduce((sum, p) => sum + (p.technicalRating || 0), 0) / candidatePerformances.length;
+        const communicationAvg = candidatePerformances.reduce((sum, p) => sum + (p.communicationRating || 0), 0) / candidatePerformances.length;
+        const problemSolvingAvg = candidatePerformances.reduce((sum, p) => sum + (p.problemSolvingRating || 0), 0) / candidatePerformances.length;
+        const experienceAvg = candidatePerformances.reduce((sum, p) => sum + (p.experienceRating || 0), 0) / candidatePerformances.length;
 
         return [
-            { skill: 'Technical Skills', rating: Number(technicalAvg.toFixed(1)), count: conversations.length },
-            { skill: 'Communication', rating: Number(communicationAvg.toFixed(1)), count: conversations.length },
-            { skill: 'Problem Solving', rating: Number(problemSolvingAvg.toFixed(1)), count: conversations.length },
-            { skill: 'Experience', rating: Number(experienceAvg.toFixed(1)), count: conversations.length }
+            { skill: 'Technical Skills', rating: Number(technicalAvg.toFixed(1)), count: candidatePerformances.length },
+            { skill: 'Communication', rating: Number(communicationAvg.toFixed(1)), count: candidatePerformances.length },
+            { skill: 'Problem Solving', rating: Number(problemSolvingAvg.toFixed(1)), count: candidatePerformances.length },
+            { skill: 'Experience', rating: Number(experienceAvg.toFixed(1)), count: candidatePerformances.length }
         ];
     };
 
@@ -117,8 +112,8 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
             recommended: number;
         }>();
 
-        interviews.forEach(interview => {
-            const position = interview.jobPosition;
+        candidatePerformances.forEach(performance => {
+            const position = performance.interview.jobPosition;
             if (!positionMap.has(position)) {
                 positionMap.set(position, {
                     total: 0,
@@ -130,23 +125,14 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
             }
             const stats = positionMap.get(position)!;
             stats.total++;
+            stats.candidates++;
 
-            // Count candidates for this interview
-            const interviewFeedbacks = feedbacks.filter(f => f.interview_id === interview.interview_id);
-            stats.candidates += interviewFeedbacks.length;
+            if (performance.avgRating > 0) {
+                stats.totalRating += performance.avgRating;
+                stats.ratingCount++;
+            }
 
-            // Calculate ratings
-            interviewFeedbacks.forEach(f => {
-                if (f.feedback?.rating) {
-                    const ratings = Object.values(f.feedback.rating).filter(r => typeof r === 'number') as number[];
-                    if (ratings.length > 0) {
-                        const avg = ratings.reduce((a, b) => a + b, 0) / ratings.length;
-                        stats.totalRating += avg;
-                        stats.ratingCount++;
-                    }
-                }
-                if (f.recommended) stats.recommended++;
-            });
+            if (performance.feedback?.recommended) stats.recommended++;
         });
 
         return Array.from(positionMap.entries())
@@ -183,13 +169,13 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
     const typeDistribution = getTypeDistribution();
 
     // Calculate overall metrics
-    const totalRatings = conversations.filter(c => c.overall_rating > 0);
+    const totalRatings = candidatePerformances.filter(p => p.avgRating > 0);
     const averageRating = totalRatings.length > 0
-        ? totalRatings.reduce((sum, c) => sum + c.overall_rating, 0) / totalRatings.length
+        ? totalRatings.reduce((sum, p) => sum + p.avgRating, 0) / totalRatings.length
         : 0;
 
-    const recommendationRate = feedbacks.length > 0
-        ? (feedbacks.filter(f => f.recommended).length / feedbacks.length) * 100
+    const recommendationRate = candidatePerformances.length > 0
+        ? (candidatePerformances.filter(p => p.feedback?.recommended).length / candidatePerformances.length) * 100
         : 0;
 
     // Chart configurations
@@ -239,7 +225,7 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                             {averageRating.toFixed(1)}
                             <span className="text-sm text-gray-500">/10</span>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">From {totalRatings.length} responses</p>
+                        <p className="text-xs text-gray-500 mt-1">From {totalRatings.length} candidates</p>
                     </CardContent>
                 </Card>
 
@@ -251,7 +237,7 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                     <CardContent>
                         <div className="text-2xl font-bold">{recommendationRate.toFixed(1)}%</div>
                         <p className="text-xs text-gray-500 mt-1">
-                            {feedbacks.filter(f => f.recommended).length} of {feedbacks.length} candidates
+                            {candidatePerformances.filter(p => p.feedback?.recommended).length} of {candidatePerformances.length} candidates
                         </p>
                     </CardContent>
                 </Card>
@@ -264,7 +250,7 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                     <CardContent>
                         <div className="text-2xl font-bold">{conversations.length}</div>
                         <p className="text-xs text-gray-500 mt-1">
-                            Across {feedbacks.length} candidates
+                            Across {candidatePerformances.length} candidates
                         </p>
                     </CardContent>
                 </Card>
@@ -279,7 +265,7 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                             {positionStats[0]?.position?.split(' ').slice(0, 2).join(' ') || "N/A"}
                         </div>
                         <p className="text-xs text-gray-500 mt-1">
-                            {positionStats[0]?.count || 0} interviews
+                            {positionStats[0]?.count || 0} candidates
                         </p>
                     </CardContent>
                 </Card>
@@ -385,7 +371,7 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                                                 <div>
                                                     <p className="font-medium">{stat.position}</p>
                                                     <p className="text-sm text-gray-500">
-                                                        {stat.count} interviews • {stat.candidates} candidates
+                                                        {stat.count} candidates
                                                     </p>
                                                 </div>
                                             </div>
@@ -427,7 +413,7 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                                     <div className="w-full bg-gray-100 rounded-full h-2 mt-2">
                                         <div
                                             className={`h-full rounded-full ${skill.rating >= 7 ? 'bg-green-500' :
-                                                    skill.rating >= 5 ? 'bg-yellow-500' : 'bg-red-500'
+                                                skill.rating >= 5 ? 'bg-yellow-500' : 'bg-red-500'
                                                 }`}
                                             style={{ width: `${skill.rating * 10}%` }}
                                         />
@@ -460,8 +446,8 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
                                                     <div className={`w-3 h-3 rounded-full ${type.type === 'technical' ? 'bg-blue-500' :
-                                                            type.type === 'behavioral' ? 'bg-green-500' :
-                                                                type.type === 'mixed' ? 'bg-purple-500' : 'bg-gray-500'
+                                                        type.type === 'behavioral' ? 'bg-green-500' :
+                                                            type.type === 'mixed' ? 'bg-purple-500' : 'bg-gray-500'
                                                         }`} />
                                                     <span className="font-medium capitalize">{type.type}</span>
                                                 </div>
@@ -473,8 +459,8 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                                             <div className="w-full bg-gray-100 rounded-full h-2">
                                                 <div
                                                     className={`h-full rounded-full ${type.type === 'technical' ? 'bg-blue-500' :
-                                                            type.type === 'behavioral' ? 'bg-green-500' :
-                                                                type.type === 'mixed' ? 'bg-purple-500' : 'bg-gray-500'
+                                                        type.type === 'behavioral' ? 'bg-green-500' :
+                                                            type.type === 'mixed' ? 'bg-purple-500' : 'bg-gray-500'
                                                         }`}
                                                     style={{ width: `${type.percentage}%` }}
                                                 />
@@ -541,7 +527,7 @@ export function InterviewAnalytics({ interviews, candidatePerformances, feedback
                                         {recommendationRate.toFixed(0)}%
                                     </p>
                                     <p className="text-sm text-yellow-700">
-                                        {feedbacks.filter(f => f.recommended).length} candidates recommended
+                                        {candidatePerformances.filter(p => p.feedback?.recommended).length} candidates recommended
                                     </p>
                                 </div>
                             </div>
