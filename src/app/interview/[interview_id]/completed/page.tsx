@@ -1,10 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Clock, Download, Share2, Star, Home, Mail, User, Briefcase, Award } from "lucide-react";
+import { Award, Briefcase, CheckCircle2, Clock, Download, Home, Mail, Share2, Star, User } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { supabase } from "../../../../../services/supabaseClient";
 import { DetailedReportDialog } from "./_components/DetailedReportDialog";
 
@@ -20,6 +21,17 @@ interface FeedbackData {
     recommendationMsg: string;
 }
 
+interface InterviewFeedbackRecord {
+    id: number;
+    interview_id: string;
+    userName: string;
+    userEmail: string;
+    feedback: any;
+    recommended: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
 export default function InterviewCompleted() {
     const params = useParams();
     const router = useRouter();
@@ -28,12 +40,25 @@ export default function InterviewCompleted() {
     const [loading, setLoading] = useState(true);
     const [showImage, setShowImage] = useState(false);
     const [showContent, setShowContent] = useState(false);
+    const [interviewFeedbackId, setInterviewFeedbackId] = useState<number | null>(null);
+    const [candidateEmail, setCandidateEmail] = useState<string>('');
 
     useEffect(() => {
         // Show content with delay for smooth animation
         const timer = setTimeout(() => {
             setShowContent(true);
         }, 500);
+
+        // Try to get candidate email from localStorage
+        const storedCandidateInfo = localStorage.getItem(`candidate_info_${interviewId}`);
+        if (storedCandidateInfo) {
+            try {
+                const { email } = JSON.parse(storedCandidateInfo);
+                setCandidateEmail(email);
+            } catch (error) {
+                console.error('Error parsing candidate info:', error);
+            }
+        }
 
         fetchFeedback();
 
@@ -42,50 +67,128 @@ export default function InterviewCompleted() {
 
     const fetchFeedback = async () => {
         try {
-            const { data, error, status } = await supabase
-                .from('Interview-Feedback')
-                .select('*')
-                .eq('interview_id', interviewId)
-                .maybeSingle(); // Use maybeSingle instead of single
+            console.log('🔍 Fetching feedback for interview:', interviewId);
 
-            console.log('Query status:', status);
+            // FIRST: Try to get feedback ID from localStorage (set by room page)
+            const storedFeedbackId = localStorage.getItem(`feedback_id_${interviewId}`);
+            if (storedFeedbackId) {
+                const feedbackId = parseInt(storedFeedbackId);
+                setInterviewFeedbackId(feedbackId);
+                console.log('📝 Using stored feedback ID:', feedbackId);
 
-            if (error) {
-                console.error('Supabase error details:', {
-                    message: error.message,
-                    code: error.code,
-                    details: error.details
-                });
-                return;
-            }
+                // Fetch by ID
+                const { data, error } = await supabase
+                    .from('Interview-Feedback')
+                    .select('*')
+                    .eq('id', feedbackId)
+                    .maybeSingle();
 
-            if (!data) {
-                console.log('No record found for this interview ID');
-                return;
-            }
+                if (error) {
+                    console.error('Supabase error (by ID):', error);
+                    // Fall back to other methods
+                    fetchFeedbackFallback();
+                    return;
+                }
 
-            console.log('Full record:', data);
-
-            // Parse the feedback if it's stored as string
-            let feedbackData = data.feedback;
-            if (typeof feedbackData === 'string') {
-                try {
-                    feedbackData = JSON.parse(feedbackData);
-                } catch (parseError) {
-                    console.error('Failed to parse feedback JSON:', parseError);
+                if (data) {
+                    console.log('✅ Found feedback by ID:', data.id);
+                    processFeedbackData(data);
                     return;
                 }
             }
 
-            if (feedbackData) {
-                setFeedback(feedbackData);
+            // SECOND: Try to get by email if we have it
+            if (candidateEmail) {
+                console.log('🔍 Trying to find feedback by email:', candidateEmail);
+                const { data, error } = await supabase
+                    .from('Interview-Feedback')
+                    .select('*')
+                    .eq('interview_id', interviewId)
+                    .eq('userEmail', candidateEmail)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (error) {
+                    console.error('Supabase error (by email):', error);
+                    fetchFeedbackFallback();
+                    return;
+                }
+
+                if (data) {
+                    console.log('✅ Found feedback by email:', data.id);
+                    setInterviewFeedbackId(data.id);
+                    processFeedbackData(data);
+                    return;
+                }
             }
+
+            // THIRD: Fallback - get the most recent feedback for this interview
+            fetchFeedbackFallback();
 
         } catch (error) {
             console.error('Unexpected error:', error);
-        } finally {
             setLoading(false);
         }
+    };
+
+    const fetchFeedbackFallback = async () => {
+        console.log('🔄 Using fallback method to fetch feedback');
+        const { data, error } = await supabase
+            .from('Interview-Feedback')
+            .select('*')
+            .eq('interview_id', interviewId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (error) {
+            console.error('Supabase fallback error:', error);
+            setLoading(false);
+            return;
+        }
+
+        if (!data) {
+            console.log('❌ No feedback found at all');
+            setLoading(false);
+            return;
+        }
+
+        console.log('⚠️ Found feedback (fallback):', data.id);
+        setInterviewFeedbackId(data.id);
+        processFeedbackData(data);
+    };
+
+    const processFeedbackData = (data: InterviewFeedbackRecord) => {
+        console.log('📊 Processing feedback data:', {
+            id: data.id,
+            hasFeedback: !!data.feedback,
+            feedbackType: typeof data.feedback
+        });
+
+        // Parse the feedback if it's stored as string
+        let feedbackData = data.feedback;
+        if (typeof feedbackData === 'string') {
+            try {
+                feedbackData = JSON.parse(feedbackData);
+            } catch (parseError) {
+                console.error('Failed to parse feedback JSON:', parseError);
+                setLoading(false);
+                return;
+            }
+        }
+
+        if (feedbackData) {
+            console.log('✅ Setting feedback state:', {
+                rating: feedbackData.rating,
+                summary: feedbackData.summary?.substring(0, 50) + '...'
+            });
+            setFeedback(feedbackData);
+        } else {
+            console.log('⚠️ Feedback data is null or undefined');
+        }
+
+        setLoading(false);
     };
 
     const getRatingColor = (rating: number) => {
@@ -219,9 +322,19 @@ export default function InterviewCompleted() {
                                 <CardTitle className="flex items-center gap-2">
                                     <Star className="w-5 h-5 text-yellow-500" />
                                     Interview Feedback
+                                    {loading && (
+                                        <div className="ml-2 inline-block">
+                                            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                        </div>
+                                    )}
                                 </CardTitle>
                                 <CardDescription>
                                     Overall assessment of your performance
+                                    {interviewFeedbackId && (
+                                        <span className="ml-2 text-xs text-gray-500">
+                                            (Feedback ID: {interviewFeedbackId})
+                                        </span>
+                                    )}
                                 </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
@@ -231,7 +344,9 @@ export default function InterviewCompleted() {
                                         <div className="grid grid-cols-2 gap-4">
                                             {Object.entries(feedback.rating).map(([key, value]) => (
                                                 <div key={key} className="text-center p-4 bg-gray-50 rounded-lg">
-                                                    <div className="text-2xl font-bold text-blue-600">{value}</div>
+                                                    <div className={`text-2xl font-bold ${getRatingColor(value)}`}>
+                                                        {value}
+                                                    </div>
                                                     <div className="text-sm text-gray-600 capitalize">
                                                         {key.replace(/([A-Z])/g, ' $1').trim()}
                                                     </div>
@@ -262,8 +377,26 @@ export default function InterviewCompleted() {
                                     </>
                                 ) : (
                                     <div className="text-center py-8 text-gray-500">
-                                        <p>Feedback analysis is being generated...</p>
-                                        <p className="text-sm mt-2">Please check back in a few moments.</p>
+                                        {loading ? (
+                                            <>
+                                                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                                <p>Generating your feedback...</p>
+                                                <p className="text-sm mt-2">This may take a moment.</p>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <p>Feedback analysis is not available yet.</p>
+                                                <p className="text-sm mt-2">Please wait a few moments and refresh the page.</p>
+                                                <Button
+                                                    onClick={fetchFeedback}
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="mt-4"
+                                                >
+                                                    Try Again
+                                                </Button>
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </CardContent>
@@ -276,9 +409,13 @@ export default function InterviewCompleted() {
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <DetailedReportDialog
-                                    interviewId={interviewId}
+                                    interviewFeedbackId={interviewFeedbackId}
                                     trigger={
-                                        <Button className="w-full justify-start gap-2 cursor-pointer" variant="outline">
+                                        <Button
+                                            className="w-full justify-start gap-2 cursor-pointer"
+                                            variant="outline"
+                                            disabled={!interviewFeedbackId}
+                                        >
                                             <Download className="w-4 h-4" />
                                             View Detailed Report
                                         </Button>
