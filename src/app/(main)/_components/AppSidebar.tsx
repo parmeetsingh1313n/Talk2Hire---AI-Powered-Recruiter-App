@@ -11,12 +11,13 @@ import {
     SidebarMenuItem,
     useSidebar,
 } from "@/components/ui/sidebar";
-import { PanelRightOpen } from "lucide-react";
+import { PanelRightOpen, LogOut, Home } from "lucide-react";
 import { Federant } from "next/font/google";
 import { SidebarOptions } from "../../../../services/Constants";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { supabase } from "../../../../services/supabaseClient";
 
 const federant = Federant({
     subsets: ['latin'],
@@ -28,12 +29,72 @@ import RotatingText from './RotatingText';
 
 export function AppSidebar() {
     const pathname = usePathname();
+    const router = useRouter();
     const { toggleSidebar } = useSidebar();
     const [hover, setHover] = useState(false);
+    const [user, setUser] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        // Check for existing session
+        const checkUser = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user) {
+                    setUser(session.user);
+                }
+            } catch (error) {
+                console.error('Error checking user:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        checkUser();
+
+        // Listen for auth changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            if (event === 'SIGNED_OUT') {
+                setUser(null);
+                // Don't push here, let handleLogout handle it
+            } else if (session?.user) {
+                setUser(session.user);
+            }
+        });
+
+        return () => subscription.unsubscribe();
+    }, [router]);
+
+    // Fix TypeScript error by adding explicit return type
+    const handleLogout = async (): Promise<void> => {
+        try {
+            // Sign out from Supabase
+            const { error } = await supabase.auth.signOut();
+
+            if (error) {
+                console.error('Error signing out:', error);
+                return;
+            }
+
+            // Clear local state
+            setUser(null);
+
+            // Force redirect to home page
+            window.location.href = '/';
+
+        } catch (error) {
+            console.error('Logout error:', error);
+        }
+    };
+
+    // Only show sidebar if user is logged in
+    if (!user && !loading) {
+        return null;
+    }
 
     return (
         <Sidebar className="bg-gradient-to-br from-slate-50 via-slate-100 to-slate-300 text-white">
-            <div className="bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 text-white h-full">
+            <div className="bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 text-white h-full flex flex-col">
                 <SidebarHeader className="p-6 relative">
                     <Button
                         onClick={toggleSidebar}
@@ -62,24 +123,18 @@ export function AppSidebar() {
                         onMouseEnter={() => setHover(true)}
                         onMouseLeave={() => setHover(false)}
                     >
-                        {/* Removed Link wrapper, now just decorative div */}
                         <div className="relative w-full h-20 flex items-center justify-center rounded-2xl overflow-hidden transition-all duration-700">
-                            {/* Animated gradient background */}
                             <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-sky-600/10 to-blue-600/10 group-hover:from-cyan-500/15 group-hover:via-sky-600/15 group-hover:to-blue-600/15 transition-all duration-500" />
 
-                            {/* Pulsing border effect */}
                             <div className="absolute inset-0 border-2 border-transparent group-hover:border-cyan-400/20 rounded-2xl transition-all duration-500" />
 
-                            {/* Main content container */}
                             <div className="relative z-10 flex flex-col items-center justify-center w-full px-4 py-5">
-                                {/* Static text with gradient effect */}
                                 <div className="mb-2 mt-3">
                                     <span className="text-lg font-bold bg-gradient-to-r from-cyan-600 via-blue-600 to-sky-600 bg-clip-text text-transparent">
                                         Create AI-Powered
                                     </span>
                                 </div>
 
-                                {/* Rotating text - Fixed to prevent double text */}
                                 <div className="h-10 flex items-center justify-center relative">
                                     <RotatingText
                                         texts={[
@@ -108,7 +163,6 @@ export function AppSidebar() {
                                     />
                                 </div>
 
-                                {/* Subtle arrow indicator */}
                                 <div className="mt-2 transform transition-transform duration-300 group-hover:translate-y-0.5">
                                     <div className="flex items-center gap-1">
                                         <div className="w-1.5 h-1.5 border-r-2 border-b-2 border-cyan-500 rotate-45 opacity-60" />
@@ -118,13 +172,12 @@ export function AppSidebar() {
                                 </div>
                             </div>
 
-                            {/* Shimmer effect on hover */}
                             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/0 to-transparent -skew-x-12 opacity-0 group-hover:opacity-50 group-hover:animate-pulse transition-opacity duration-500" />
                         </div>
                     </div>
                 </SidebarHeader>
 
-                <SidebarContent className="py-7 mb-3">
+                <SidebarContent className="py-7 mb-3 flex-1">
                     <SidebarGroup>
                         <SidebarMenu className="space-y-4">
                             {SidebarOptions.map((option, index) => {
@@ -145,7 +198,6 @@ export function AppSidebar() {
                                                     hover:before:from-cyan-400/8 hover:before:via-sky-500/8 hover:before:to-blue-600/8 before:transition-all before:duration-500
                                                 `}
                                             >
-                                                {/* Floating icon container */}
                                                 <div className={`
                                                     relative z-10 p-2 rounded-xl transition-all duration-300 transform flex-shrink-0
                                                     ${isActive
@@ -155,8 +207,6 @@ export function AppSidebar() {
                                                 `}>
                                                     <option.icon className="w-5 h-3" />
                                                 </div>
-
-                                                {/* Text with enhanced styling */}
                                                 <span className={`
                                                     relative z-10 font-semibold text-base tracking-wide transition-all duration-300 flex-1 min-w-0
                                                     ${isActive
@@ -166,9 +216,6 @@ export function AppSidebar() {
                                                 `}>
                                                     {option.name}
                                                 </span>
-
-
-                                                {/* Hover glow effect */}
                                                 <div className="absolute inset-0 bg-gradient-to-r from-cyan-400/0 via-sky-500/0 to-blue-600/0 group-hover:from-cyan-400/5 group-hover:via-sky-500/5 group-hover:to-blue-600/5 transition-all duration-500 -z-10" />
                                             </Link>
                                         </SidebarMenuButton>
@@ -179,25 +226,38 @@ export function AppSidebar() {
                     </SidebarGroup>
                 </SidebarContent>
 
-                <SidebarFooter className="p-4">
-                    <div className="relative p-4 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 overflow-hidden">
-                        {/* Background pattern */}
-                        <div className="absolute inset-0 bg-gradient-to-br from-cyan-50/50 via-transparent to-blue-50/50" />
+                {/* Simple Logout Footer */}
+                <SidebarFooter className="p-4 border-t border-slate-300/30 backdrop-blur-sm bg-gradient-to-t from-white/50 to-transparent">
+                    <div className="space-y-3">
+                        {/* Home Button */}
+                        <Button
+                            variant="ghost"
+                            className="w-full justify-start p-4 rounded-2xl text-slate-700 hover:text-cyan-700 hover:bg-white/20 hover:backdrop-blur-lg transition-all duration-300"
+                            asChild
+                        >
+                            <Link href="/dashboard">
+                                <Home className="w-5 h-5 mr-3" />
+                                Dashboard Home
+                            </Link>
+                        </Button>
 
-                        <div className="relative z-10 flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-400 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg">
-                                <div className="w-4 h-4 rounded-full bg-white/30 animate-pulse" />
-                            </div>
-                            <div>
-                                <p className="text-sm font-semibold text-slate-800">Premium Plan</p>
-                                <p className="text-xs text-slate-500">Unlimited features</p>
-                            </div>
-                            <div className="ml-auto">
-                                <div className="px-3 py-1 rounded-full bg-gradient-to-r from-cyan-400 to-blue-600 text-white text-xs font-medium shadow-sm">
-                                    Pro
+                        {/* Simple Logout Button */}
+                        <Button
+                            onClick={handleLogout}
+                            disabled={loading}
+                            className="w-full justify-start p-4 rounded-2xl bg-gradient-to-r from-red-50 to-rose-50 border border-red-200 text-red-700 hover:bg-gradient-to-r hover:from-red-100 hover:to-rose-100 hover:text-red-800 hover:border-red-300 transition-all duration-300 group"
+                            variant="ghost"
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-gradient-to-br from-red-400 to-rose-500 text-white group-hover:from-red-500 group-hover:to-rose-600 transition-all duration-300">
+                                    <LogOut className="w-4 h-4" />
+                                </div>
+                                <div className="text-left">
+                                    <p className="font-semibold">Sign Out</p>
+                                    <p className="text-xs text-red-600/70">End your session</p>
                                 </div>
                             </div>
-                        </div>
+                        </Button>
                     </div>
                 </SidebarFooter>
             </div>
