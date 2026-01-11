@@ -1,20 +1,22 @@
 // types.ts - Enhanced version with all necessary types
 
 export interface Interview {
-    id: string;
+    id: number;
+    created_at: string;
+    interview_id: string;
+    userEmail: string;
+    userName: string;
     jobPosition: string;
     jobDescription: any;
-    duration: string;
     type: string;
-    userEmail: string;
-    interview_id: string;
     schedule_date: string;
     schedule_time: string;
-    validity: number;
-    created_at: string;
+    duration: string;
     questionList: any;
-    service_type?: string;
+    interview_link: string;
+    completed: boolean;
 }
+
 
 export interface FeedbackRating {
     technicalSkills?: number;
@@ -32,13 +34,23 @@ export interface FeedbackData {
 }
 
 export interface InterviewFeedback {
-    id: string;
+    id: number;
+    created_at: string;
     userName: string;
     userEmail: string;
     interview_id: string;
-    feedback: FeedbackData;
+    feedback: {
+        rating?: {
+            technicalSkills: number;
+            communication: number;
+            problemSolving: number;
+            experience: number;
+        };
+        summary?: string;
+        recommendationMsg?: string;
+    };
     recommended: boolean;
-    created_at: string;
+    updated_at: string;
 }
 
 export interface InterviewConversation {
@@ -59,6 +71,7 @@ export interface InterviewConversation {
     overall_rating: number;
     keywords_matched: any;
     analysis_insights: string;
+    interview_feedback_id: number;
 }
 
 export interface ResumeData {
@@ -82,9 +95,8 @@ export interface ResumeData {
 
 export interface CandidatePerformance {
     interview: Interview;
-    feedback?: InterviewFeedback;
+    feedback: InterviewFeedback;
     conversations: InterviewConversation[];
-    resumeData?: ResumeData;
     conversationCount: number;
     avgRating: number;
     technicalRating: number;
@@ -92,7 +104,6 @@ export interface CandidatePerformance {
     problemSolvingRating: number;
     experienceRating: number;
 }
-
 export interface MonthlyTrend {
     month: string;
     interviews: number;
