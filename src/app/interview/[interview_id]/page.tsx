@@ -134,6 +134,8 @@ function Interview() {
     const [showScheduleAlert, setShowScheduleAlert] = useState(false);
     // 👇 ADDED ERROR STATE
     const [emailValidationError, setEmailValidationError] = useState<string | null>(null);
+    // 👇 ADDED: Store interview feedback record ID
+    const [interviewFeedbackId, setInterviewFeedbackId] = useState<number | null>(null);
 
     useEffect(() => {
         interview_id && GetInterviewDetails();
@@ -251,6 +253,53 @@ function Interview() {
                 setEmailValidationError(validationResult.message);
                 setLoading(false);
                 return; // STOP execution
+            }
+
+            // ✅ CRITICAL FIX: Create Interview-Feedback record BEFORE proceeding
+            try {
+                console.log('📝 Creating Interview-Feedback record for candidate:', { userName, email, interview_id });
+
+                const { data, error } = await supabase
+                    .from('Interview-Feedback')
+                    .insert([
+                        {
+                            interview_id: interview_id,
+                            userName: userName,
+                            userEmail: email,
+                            feedback: null, // Will be updated later
+                            recommended: false,
+                            created_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString()
+                        }
+                    ])
+                    .select()
+                    .single();
+
+                if (error) {
+                    console.error('❌ Error creating Interview-Feedback record:', error);
+                    // Try to fetch existing record instead
+                    const { data: existingData } = await supabase
+                        .from('Interview-Feedback')
+                        .select('id')
+                        .eq('interview_id', interview_id)
+                        .eq('userEmail', email)
+                        .maybeSingle();
+
+                    if (existingData) {
+                        setInterviewFeedbackId(existingData.id);
+                        console.log('✅ Using existing Interview-Feedback record:', existingData.id);
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    setInterviewFeedbackId(data.id);
+                    console.log('✅ Interview-Feedback record created:', data.id);
+                }
+            } catch (feedbackError) {
+                console.error('❌ Failed to create Interview-Feedback record:', feedbackError);
+                toast.error('Failed to initialize interview session. Please try again.');
+                setLoading(false);
+                return;
             }
 
             // If we get here, the email is valid and authorized
@@ -403,6 +452,12 @@ function Interview() {
             setShowScheduleAlert(true);
             return;
         }
+
+        // Store candidate info in localStorage for the room page to use
+        localStorage.setItem(`candidate_info_${interview_id}`, JSON.stringify({
+            userName,
+            email
+        }));
 
         router.push(`/interview/${interview_id}/room`);
     };
