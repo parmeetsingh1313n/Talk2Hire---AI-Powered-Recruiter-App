@@ -4,6 +4,7 @@ import { Federant } from 'next/font/google';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSignIn, useUser } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 
 const federant = Federant({
     subsets: ['latin'],
@@ -30,15 +31,24 @@ export default function Login() {
   }, [isSignedIn, router]);
 
   const signInWithGoogle = async () => {
-    if (!signIn) return;
+    if (!signIn) {
+      toast.error('Auth is still loading, please try again in a moment.');
+      return;
+    }
     try {
-      await signIn.sso({
+      const origin = window.location.origin;
+      const { error } = await signIn.sso({
         strategy: 'oauth_google',
-        redirectUrl: '/auth/sso-callback',
-        redirectCallbackUrl: '/dashboard',
+        redirectUrl: `${origin}/auth/sso-callback`,
+        redirectCallbackUrl: `${origin}/dashboard`,
       });
+      if (error) {
+        console.error('Google sign-in error:', error);
+        toast.error(error.message || 'Could not start Google sign-in.');
+      }
     } catch (error) {
       console.error('Error signing in with Google:', error);
+      toast.error('Something went wrong starting Google sign-in.');
     }
   }
 
