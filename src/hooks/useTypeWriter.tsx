@@ -6,6 +6,14 @@ export function useTypewriter(text : string, speed = 100, delay = 10) {
     const [isTyping, setIsTyping] = useState(false);
     const [isComplete, setIsComplete] = useState(false);
 
+    // Restart typing from scratch whenever the source text changes
+    // (e.g. the user's name loads in after the initial 'User' fallback).
+    useEffect(() => {
+        setDisplayText('');
+        setCurrentIndex(0);
+        setIsComplete(false);
+    }, [text]);
+
     useEffect(() => {
         const timer = setTimeout(() => {
             setIsTyping(true);

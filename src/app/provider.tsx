@@ -29,7 +29,7 @@ function Provider({ children }: { children: React.ReactNode }) {
         if (!email) return;
 
         // Check if user exists in the Supabase Users table (still our database).
-        let { data: Users } = await supabase
+        const { data: Users } = await supabase
             .from('Users')
             .select("*")
             .eq('email', email);
@@ -45,8 +45,20 @@ function Provider({ children }: { children: React.ReactNode }) {
             }
             return;
         }
+
         if (Users && Users.length > 0) {
-            setUser(Users[0]);
+            const existing = Users[0];
+            // Backfill name/picture if the stored row is missing them.
+            if (!existing.name || !existing.picture) {
+                const { data } = await supabase
+                    .from('Users')
+                    .update({ name, picture })
+                    .eq('email', email)
+                    .select();
+                setUser(data && data.length > 0 ? data[0] : existing);
+                return;
+            }
+            setUser(existing);
         }
     }
 
