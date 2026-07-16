@@ -18,7 +18,7 @@ export default function Login() {
   const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { signIn, isLoaded: signInLoaded } = useSignIn();
+  const { signIn } = useSignIn();
   const { isSignedIn } = useUser();
   const router = useRouter();
 
@@ -30,12 +30,12 @@ export default function Login() {
   }, [isSignedIn, router]);
 
   const signInWithGoogle = async () => {
-    if (!signInLoaded || !signIn) return;
+    if (!signIn) return;
     try {
-      await signIn.authenticateWithRedirect({
+      await signIn.sso({
         strategy: 'oauth_google',
         redirectUrl: '/auth/sso-callback',
-        redirectUrlComplete: '/dashboard',
+        redirectCallbackUrl: '/dashboard',
       });
     } catch (error) {
       console.error('Error signing in with Google:', error);
