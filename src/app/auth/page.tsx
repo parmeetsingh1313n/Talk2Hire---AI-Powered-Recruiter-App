@@ -2,7 +2,8 @@
 
 import { Federant } from 'next/font/google';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase } from '../../../services/supabaseClient';
+import { useSignIn, useUser } from '@clerk/nextjs';
+import { useRouter } from 'next/navigation';
 
 const federant = Federant({
     subsets: ['latin'],
@@ -17,16 +18,27 @@ export default function Login() {
   const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/dashboard/`
-      }
-    })
+  const { signIn, isLoaded: signInLoaded } = useSignIn();
+  const { isSignedIn } = useUser();
+  const router = useRouter();
 
-    if (error) {
-      console.error('Error signing in with Google:', error.message);
+  // If already signed in, don't stay on the login page.
+  useEffect(() => {
+    if (isSignedIn) {
+      router.replace('/dashboard');
+    }
+  }, [isSignedIn, router]);
+
+  const signInWithGoogle = async () => {
+    if (!signInLoaded || !signIn) return;
+    try {
+      await signIn.authenticateWithRedirect({
+        strategy: 'oauth_google',
+        redirectUrl: '/auth/sso-callback',
+        redirectUrlComplete: '/dashboard',
+      });
+    } catch (error) {
+      console.error('Error signing in with Google:', error);
     }
   }
 

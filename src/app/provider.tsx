@@ -1,42 +1,55 @@
 "use client"
 import React, { useContext, useEffect, useState } from 'react';
+import { useUser as useClerkUser } from '@clerk/nextjs';
 import { UserDetailContext } from '../../context/UserDetailContext';
 import { supabase } from '../../services/supabaseClient';
 
 function Provider({ children }: { children: React.ReactNode }) {
 
     const [user, setUser] = useState<any>(null);
+    // Clerk is the source of truth for authentication.
+    const { user: clerkUser, isLoaded } = useClerkUser();
 
     useEffect(() => {
-        CreateNewUser();
-    }, [])
-    const CreateNewUser = () => {
-        supabase.auth.getUser().then(async ({ data: { user } }) => {
-            // Check if user exists
-            let { data: Users, error } = await supabase
-                .from('Users')
-                .select("*")
-                .eq('email', user?.email)
+        if (!isLoaded) return;
+        if (clerkUser) {
+            CreateNewUser();
+        } else {
+            setUser(null);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isLoaded, clerkUser?.id]);
 
-            console.log(Users)
-            //if not create a new user
-            if (Users?.length === 0) {
-                const { data, error } = await supabase.from('Users').insert([
-                    {
-                        email: user?.email,
-                        name: user?.user_metadata?.name,
-                        picture: user?.user_metadata?.picture,
-                    }
-                ]);
-                console.log(data);
-                setUser(data);
-                return;
+    const CreateNewUser = async () => {
+        // Pull identity from Clerk, mapped to the same shape the app already uses.
+        const email = clerkUser?.primaryEmailAddress?.emailAddress;
+        const name = clerkUser?.fullName || clerkUser?.firstName || 'User';
+        const picture = clerkUser?.imageUrl;
+
+        if (!email) return;
+
+        // Check if user exists in the Supabase Users table (still our database).
+        let { data: Users } = await supabase
+            .from('Users')
+            .select("*")
+            .eq('email', email);
+
+        // If not, create a new user row.
+        if (Users?.length === 0) {
+            const { data } = await supabase.from('Users').insert([
+                { email, name, picture }
+            ]).select();
+
+            if (data && data.length > 0) {
+                setUser(data[0]);
             }
-            if (Users && Users.length > 0) {
-                setUser(Users[0]);
-            }
-        });
+            return;
+        }
+        if (Users && Users.length > 0) {
+            setUser(Users[0]);
+        }
     }
+
     return (
         <div>
             <UserDetailContext.Provider value={{ user, setUser }}>

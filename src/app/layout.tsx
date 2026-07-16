@@ -2,6 +2,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import Provider from "./provider";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -22,19 +23,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <link
-          href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"
-          rel="stylesheet"
-        />
-      </head>
-      <body className={`${outfit.variable} antialiased`} suppressHydrationWarning>
-        <Provider>
-          {children}
-          <Toaster />
-        </Provider>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en" suppressHydrationWarning>
+        <head>
+          <link
+            href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"
+            rel="stylesheet"
+          />
+        </head>
+        <body className={`${outfit.variable} antialiased`} suppressHydrationWarning>
+          <Provider>
+            {children}
+            <Toaster />
+          </Provider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

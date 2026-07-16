@@ -15,9 +15,9 @@ import { PanelRightOpen, LogOut, Home } from "lucide-react";
 import { Federant } from "next/font/google";
 import { SidebarOptions } from "../../../../services/Constants";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
-import { supabase } from "../../../../services/supabaseClient";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
+import { useUser, useClerk } from "@clerk/nextjs";
 
 const federant = Federant({
     subsets: ['latin'],
@@ -29,66 +29,27 @@ import RotatingText from './RotatingText';
 
 export function AppSidebar() {
     const pathname = usePathname();
-    const router = useRouter();
     const { toggleSidebar } = useSidebar();
     const [hover, setHover] = useState(false);
-    const [user, setUser] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        // Check for existing session
-        const checkUser = async () => {
-            try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (session?.user) {
-                    setUser(session.user);
-                }
-            } catch (error) {
-                console.error('Error checking user:', error);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        checkUser();
-
-        // Listen for auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-            if (event === 'SIGNED_OUT') {
-                setUser(null);
-                // Don't push here, let handleLogout handle it
-            } else if (session?.user) {
-                setUser(session.user);
-            }
-        });
-
-        return () => subscription.unsubscribe();
-    }, [router]);
+    // Clerk tells us whether someone is signed in.
+    const { isSignedIn, isLoaded } = useUser();
+    const { signOut } = useClerk();
+    const [loading, setLoading] = useState(false);
 
     // Fix TypeScript error by adding explicit return type
     const handleLogout = async (): Promise<void> => {
         try {
-            // Sign out from Supabase
-            const { error } = await supabase.auth.signOut();
-
-            if (error) {
-                console.error('Error signing out:', error);
-                return;
-            }
-
-            // Clear local state
-            setUser(null);
-
-            // Force redirect to home page
-            window.location.href = '/';
-
+            setLoading(true);
+            // Sign out from Clerk, then send the user home.
+            await signOut({ redirectUrl: '/' });
         } catch (error) {
             console.error('Logout error:', error);
+            setLoading(false);
         }
     };
 
     // Only show sidebar if user is logged in
-    if (!user && !loading) {
+    if (!isSignedIn && isLoaded) {
         return null;
     }
 
@@ -229,17 +190,6 @@ export function AppSidebar() {
                 {/* Simple Logout Footer */}
                 <SidebarFooter className="p-4 border-t border-slate-300/30 backdrop-blur-sm bg-gradient-to-t from-white/50 to-transparent">
                     <div className="space-y-3">
-                        {/* Home Button */}
-                        <Button
-                            variant="ghost"
-                            className="w-full justify-start p-4 rounded-2xl text-slate-700 hover:text-cyan-700 hover:bg-white/20 hover:backdrop-blur-lg transition-all duration-300"
-                            asChild
-                        >
-                            <Link href="/dashboard">
-                                <Home className="w-5 h-5 mr-3" />
-                                Dashboard Home
-                            </Link>
-                        </Button>
 
                         {/* Simple Logout Button */}
                         <Button
