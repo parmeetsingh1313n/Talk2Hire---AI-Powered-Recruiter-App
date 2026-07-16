@@ -11,7 +11,7 @@ import {
     SidebarMenuItem,
     useSidebar,
 } from "@/components/ui/sidebar";
-import { PanelRightOpen, LogOut, Home } from "lucide-react";
+import { PanelRightOpen, LogOut } from "lucide-react";
 import { Federant } from "next/font/google";
 import { SidebarOptions } from "../../../../services/Constants";
 import Link from "next/link";
@@ -190,7 +190,6 @@ export function AppSidebar() {
                 {/* Simple Logout Footer */}
                 <SidebarFooter className="p-4 border-t border-slate-300/30 backdrop-blur-sm bg-gradient-to-t from-white/50 to-transparent">
                     <div className="space-y-3">
-
                         {/* Simple Logout Button */}
                         <Button
                             onClick={handleLogout}
