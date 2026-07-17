@@ -46,9 +46,13 @@ export default function Login() {
         console.error('Google sign-in error:', error);
         toast.error(error.message || 'Could not start Google sign-in.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error signing in with Google:', error);
-      toast.error('Something went wrong starting Google sign-in.');
+      const message =
+        error?.errors?.[0]?.longMessage ||
+        error?.errors?.[0]?.message ||
+        'Something went wrong starting Google sign-in.';
+      toast.error(message);
     }
   }
 
