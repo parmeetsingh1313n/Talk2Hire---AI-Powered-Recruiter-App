@@ -2,9 +2,8 @@
 
 import { Federant } from 'next/font/google';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSignIn, useUser } from '@clerk/nextjs';
+import { SignIn, useUser } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
 
 const federant = Federant({
     subsets: ['latin'],
@@ -19,7 +18,6 @@ export default function Login() {
   const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { signIn } = useSignIn();
   const { isSignedIn } = useUser();
   const router = useRouter();
 
@@ -29,32 +27,6 @@ export default function Login() {
       router.replace('/dashboard');
     }
   }, [isSignedIn, router]);
-
-  const signInWithGoogle = async () => {
-    if (!signIn) {
-      toast.error('Auth is still loading, please try again in a moment.');
-      return;
-    }
-    try {
-      const origin = window.location.origin;
-      const { error } = await signIn.sso({
-        strategy: 'oauth_google',
-        redirectUrl: `${origin}/auth/sso-callback`,
-        redirectCallbackUrl: `${origin}/dashboard`,
-      });
-      if (error) {
-        console.error('Google sign-in error:', error);
-        toast.error(error.message || 'Could not start Google sign-in.');
-      }
-    } catch (error: any) {
-      console.error('Error signing in with Google:', error);
-      const message =
-        error?.errors?.[0]?.longMessage ||
-        error?.errors?.[0]?.message ||
-        'Something went wrong starting Google sign-in.';
-      toast.error(message);
-    }
-  }
 
   // Array of your video files
   const videos: string[] = [
@@ -162,69 +134,12 @@ export default function Login() {
                 </span>
               </div>
 
-              <div className="w-full max-w-md border-2 rounded-3xl p-9 bg-white/10 backdrop-blur-sm bg-gradient-to-br from-cyan-50/30 via-sky-50/20 to-blue-50/30">
-                <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-cyan-500 via-blue-600 to-sky-600 rounded-2xl mb-6 shadow-2xl">
-                  <video
-                    src="/signin-img/signin-icon.mp4"
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className="w-full h-full object-cover rounded-2xl border"
-                    aria-label="Sign in animation"
-                  />
-                </div>
-
-                <h3 className="text-3xl font-bold bg-gradient-to-r from-cyan-600 via-blue-600 to-sky-600 bg-clip-text text-transparent mb-2">
-                  Sign In
-                </h3>
-                <p className="text-slate-700">Access your recruitment command center</p>
-
-                <div className="grid grid-cols-2 gap-4 mb-8">
-                  <div className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10  backdrop-blur-sm p-4 rounded-xl border-cyan-200/40 hover:border-cyan-300/60 ">
-                    <div className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
-                      2M+
-                    </div>
-                    <div className="text-sm text-slate-600">Profiles Analyzed</div>
-                  </div>
-                  <div className="bg-gradient-to-r from-blue-500/10 to-sky-500/10 backdrop-blur-sm p-4 rounded-xl border border-white/30">
-                    <div className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-cyan-600 bg-clip-text text-transparent">
-                      98%
-                    </div>
-                    <div className="text-sm text-slate-600">Success Rate</div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={signInWithGoogle}
-                  className="group w-full bg-gradient-to-r from-cyan-500 via-blue-600 to-sky-600 text-white p-4 rounded-2xl font-bold text-lg shadow-2xl hover:shadow-3xl transform hover:scale-105 transition-all duration-300 mb-6 relative overflow-hidden cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-                  aria-label="Continue with Google"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-sky-500 via-cyan-600 to-blue-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <div className="relative flex items-center justify-center space-x-3">
-                    <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-lg">
-                      <i className="ri-google-fill text-blue-500 text-xl" aria-hidden="true"></i>
-                    </div>
-                    <span className="font-bold">Continue with Google</span>
-                    <i className="ri-arrow-right-line text-xl group-hover:translate-x-1 transition-transform" aria-hidden="true"></i>
-                  </div>
-                </button>
-
-                <div className="space-y-3 mb-8">
-                  <div className="flex items-center space-x-3 text-gray-700">
-                    <i className="ri-shield-check-line text-green-500" aria-hidden="true"></i>
-                    <span className="text-sm">Enterprise-grade security</span>
-                  </div>
-                  <div className="flex items-center space-x-3 text-gray-700">
-                    <i className="ri-time-line text-blue-500" aria-hidden="true"></i>
-                    <span className="text-sm">Instant access to AI tools</span>
-                  </div>
-                  <div className="flex items-center space-x-3 text-gray-700">
-                    <i className="ri-team-line text-purple-500" aria-hidden="true"></i>
-                    <span className="text-sm">Collaborative hiring workspace</span>
-                  </div>
-                </div>
+              <div className="flex justify-center">
+                <SignIn
+                  routing="hash"
+                  signUpUrl="/sign-up"
+                  fallbackRedirectUrl="/dashboard"
+                />
               </div>
             </div>
           </div>
