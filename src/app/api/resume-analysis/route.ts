@@ -268,8 +268,7 @@ async function saveToSupabase(interview_id: string, userName: string, userEmail:
                 ),
                 `${frontendData.experience.level} with ${frontendData.experience.years} years experience`
             ],
-            raw_analysis_data: rawData,
-            analysis_timestamp: new Date().toISOString()
+            raw_analysis_data: rawData
         };
 
         const { data, error } = await supabase

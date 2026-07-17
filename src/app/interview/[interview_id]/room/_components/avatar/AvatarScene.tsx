@@ -42,7 +42,7 @@ export function AvatarScene({
     hasPendingMessage = false,
     onAvatarReady
 }: AvatarSceneProps) {
-    const controlsRef = useRef<any>();
+    const controlsRef = useRef<any>(null);
 
     useEffect(() => {
         if (controlsRef.current) {
